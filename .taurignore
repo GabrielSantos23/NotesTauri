@@ -1,0 +1,3 @@
+# Ignore notes directory to prevent rebuilds when notes are created/edited/deleted
+apps/web/src-tauri/notes/
+apps/web/src-tauri/notes/notes/ 

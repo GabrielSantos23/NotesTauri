@@ -1,0 +1,577 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+html,
+body {
+  background: transparent !important;
+  min-height: 100vh;
+  overflow-x: hidden;
+
+  @media (prefers-color-scheme: dark) {
+    color-scheme: dark;
+  }
+}
+
+/* Ensure proper stacking context for backdrop blur */
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* Window dragging support */
+.draggable {
+  -webkit-app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.draggable:active {
+  cursor: grabbing;
+}
+
+.non-draggable {
+  -webkit-app-region: no-drag;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+/* Ensure header is properly draggable */
+.header-draggable {
+  -webkit-app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grab;
+  /* background-color: var(--sidebar);
+  border-bottom: 1px solid var(--sidebar-border); */
+}
+
+.header-draggable:active {
+  cursor: grabbing;
+}
+
+/* Sidebar styling */
+.sidebar {
+  background-color: var(--sidebar);
+  border-right: 1px solid var(--sidebar-border);
+}
+
+/* Content area styling */
+.content-area {
+  background-color: var(--background);
+}
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.81 0.1 252);
+  --chart-2: oklch(0.62 0.19 260);
+  --chart-3: oklch(0.55 0.22 263);
+  --chart-4: oklch(0.49 0.22 264);
+  --chart-5: oklch(0.42 0.18 266);
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  --radius: 0.625rem;
+  --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+  --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
+  --shadow-sm:
+    0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+  --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
+  --shadow-md:
+    0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
+  --shadow-lg:
+    0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 4px 6px -1px hsl(0 0% 0% / 0.1);
+  --shadow-xl:
+    0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 8px 10px -1px hsl(0 0% 0% / 0.1);
+  --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.269 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.371 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.275 0 0);
+  --input: oklch(0.325 0 0);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.81 0.1 252);
+  --chart-2: oklch(0.62 0.19 260);
+  --chart-3: oklch(0.55 0.22 263);
+  --chart-4: oklch(0.49 0.22 264);
+  --chart-5: oklch(0.42 0.18 266);
+}
+
+@layer base {
+  body {
+    color: var(--foreground);
+  }
+
+  /* Custom scrollbar styles */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent !important;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: var(--muted-foreground);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: var(--foreground);
+  }
+
+  /* Hide scrollbar arrows/buttons for thin scrollbar */
+  .scrollbar-thin::-webkit-scrollbar-button {
+    display: none !important;
+  }
+
+  /* Custom scrollbar with theme colors */
+  .scrollbar-custom {
+    scrollbar-width: thin !important;
+  }
+
+  .scrollbar-custom::-webkit-scrollbar {
+    width: 8px !important;
+    height: 8px !important;
+  }
+
+  .scrollbar-custom::-webkit-scrollbar-track {
+    background: transparent !important;
+    border-radius: 4px !important;
+  }
+
+  .scrollbar-custom::-webkit-scrollbar-thumb {
+    background: var(--muted-foreground) !important;
+    border-radius: 4px !important;
+    border: 1px solid transparent !important;
+    background-clip: content-box !important;
+  }
+
+  .scrollbar-custom::-webkit-scrollbar-thumb:hover {
+    background: var(--foreground) !important;
+    background-clip: content-box !important;
+  }
+
+  /* Hide scrollbar arrows/buttons */
+  .scrollbar-custom::-webkit-scrollbar-button {
+    display: none !important;
+  }
+
+  /* More specific selectors for better override */
+  div.scrollbar-custom::-webkit-scrollbar-track {
+    background: transparent !important;
+  }
+
+  div.scrollbar-custom::-webkit-scrollbar-thumb {
+    background: var(--muted-foreground) !important;
+  }
+
+  /* Global scrollbar override for the main content area */
+  .overflow-y-auto::-webkit-scrollbar {
+    width: 8px !important;
+    height: 8px !important;
+  }
+
+  .overflow-y-auto::-webkit-scrollbar-track {
+    background: transparent !important;
+    border-radius: 4px !important;
+  }
+
+  .overflow-y-auto::-webkit-scrollbar-thumb {
+    background: var(--muted-foreground) !important;
+    border-radius: 4px !important;
+    border: 1px solid transparent !important;
+    background-clip: content-box !important;
+  }
+
+  .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: var(--foreground) !important;
+    background-clip: content-box !important;
+  }
+
+  /* Hide scrollbar arrows/buttons for overflow-y-auto */
+  .overflow-y-auto::-webkit-scrollbar-button {
+    display: none !important;
+  }
+
+  /* Rounded scrollbar */
+  .scrollbar-rounded {
+    scrollbar-width: thin;
+  }
+
+  .scrollbar-rounded::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  .scrollbar-rounded::-webkit-scrollbar-track {
+    background: transparent !important;
+  }
+
+  .scrollbar-rounded::-webkit-scrollbar-thumb {
+    background: var(--muted-foreground);
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  .scrollbar-rounded::-webkit-scrollbar-thumb:hover {
+    background: var(--foreground);
+    background-clip: content-box;
+  }
+
+  /* Hide scrollbar arrows/buttons for rounded scrollbar */
+  .scrollbar-rounded::-webkit-scrollbar-button {
+    display: none !important;
+  }
+
+  /* Hidden scrollbar (for clean look) */
+  .scrollbar-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Ensure backdrop-filter works with better browser support */
+  .backdrop-blur-sm {
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    transform: translateZ(0);
+    will-change: backdrop-filter;
+  }
+
+  .backdrop-blur-md {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transform: translateZ(0);
+    will-change: backdrop-filter;
+  }
+
+  .backdrop-blur-lg {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    transform: translateZ(0);
+    will-change: backdrop-filter;
+  }
+
+  .backdrop-blur-xl {
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    transform: translateZ(0);
+    will-change: backdrop-filter;
+  }
+
+  .backdrop-blur-2xl {
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    transform: translateZ(0);
+    will-change: backdrop-filter;
+  }
+
+  .backdrop-blur-3xl {
+    backdrop-filter: blur(64px);
+    -webkit-backdrop-filter: blur(64px);
+    transform: translateZ(0);
+    will-change: backdrop-filter;
+  }
+
+  /* Corrige alinhamento de bullets em listas da prose */
+  .prose ul > li,
+  .prose ol > li {
+    @apply leading-relaxed relative pl-6;
+  }
+
+  .prose ul > li::marker,
+  .prose ol > li::marker {
+    @apply text-base align-middle;
+  }
+  .prose ul {
+    list-style: disc;
+    padding-left: 1.25rem;
+  }
+
+  .prose ol {
+    list-style: decimal;
+    padding-left: 1.25rem;
+  }
+
+  .prose li::marker {
+    font-size: 1rem;
+    line-height: 1.75rem;
+  }
+}
+
+/* TipTap Editor Styles */
+.ProseMirror {
+  @apply outline-none;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Typography styles to replace prose plugin */
+.ProseMirror h1 {
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  margin-top: 1.5rem;
+  color: var(--foreground);
+}
+
+.ProseMirror h2 {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  margin-top: 1.25rem;
+  color: var(--foreground);
+}
+
+.ProseMirror h3 {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  margin-top: 1rem;
+  color: var(--foreground);
+}
+
+.ProseMirror h4 {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  margin-top: 0.75rem;
+  color: var(--foreground);
+}
+
+.ProseMirror h5 {
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  margin-top: 0.5rem;
+  color: var(--foreground);
+}
+
+.ProseMirror h6 {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  margin-top: 0.5rem;
+  color: var(--foreground);
+}
+
+.ProseMirror p {
+  margin-bottom: 0.75rem;
+  line-height: 1.625;
+  color: var(--foreground);
+}
+
+/* Fixed list styles for proper bullet alignment */
+.ProseMirror ul {
+  list-style: disc;
+  list-style-position: outside;
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+}
+
+.ProseMirror ol {
+  list-style: decimal;
+  list-style-position: outside;
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+}
+
+.ProseMirror li {
+  margin-bottom: 0.25rem;
+  line-height: 1.625;
+  color: var(--foreground);
+}
+
+.ProseMirror li::marker {
+  color: var(--foreground);
+}
+
+/* Additional styles for better ordered list alignment */
+.ProseMirror ol > li {
+  padding-left: 0.5rem;
+}
+
+.ProseMirror ol > li::marker {
+  color: var(--foreground);
+  font-weight: normal;
+}
+
+/* Ensure proper spacing for list content */
+.ProseMirror li > p {
+  @apply inline;
+}
+
+.ProseMirror li > p:first-child {
+  @apply inline;
+}
+
+/* More specific ordered list fixes */
+.ProseMirror ol {
+  counter-reset: list-counter;
+}
+
+.ProseMirror ol > li {
+  display: list-item;
+  list-style-type: decimal;
+  list-style-position: outside;
+  padding-left: 1.5rem;
+}
+
+.ProseMirror ol > li::marker {
+  color: inherit;
+  font-weight: normal;
+  margin-right: 0.5rem;
+}
+
+/* Ensure list items don't have extra spacing */
+.ProseMirror li p {
+  margin: 0;
+  display: inline;
+}
+
+.ProseMirror blockquote {
+  border-left: 4px solid var(--muted-foreground);
+  padding-left: 1rem;
+  font-style: italic;
+  margin: 1rem 0;
+  color: var(--foreground);
+}
+
+.ProseMirror code {
+  background-color: var(--muted);
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  font-family: monospace;
+  color: var(--foreground);
+}
+
+.ProseMirror pre {
+  background-color: var(--muted);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+.ProseMirror pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+.ProseMirror strong {
+  @apply font-semibold;
+}
+
+.ProseMirror em {
+  @apply italic;
+}

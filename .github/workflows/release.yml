@@ -1,0 +1,97 @@
+name: "Release"
+on:
+  push:
+    tags:
+      - "notes-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: install rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: install dependencies (ubuntu only)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: install frontend dependencies
+        run: npm install
+        working-directory: apps/web
+
+      - name: build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/web
+          tagName: notes-v__VERSION__
+          releaseName: "Notes v__VERSION__"
+          releaseBody: "See the assets to download this version."
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+  update-latest-json:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Wait for release to be available
+        run: sleep 30
+
+      - name: Download and update latest.json
+        run: |
+          # Download the latest.json from the release
+          curl -L "https://github.com/GabrielSantos23/NotesApp/releases/latest/download/latest.json" -o latest.json
+
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Commit and push the updated latest.json
+          git add latest.json
+          git commit -m "Auto-update latest.json with release signatures" || echo "No changes to commit"
+          git push
+
+      - name: Update release/latest.json
+        run: |
+          # Create release branch if it doesn't exist
+          git checkout -b release 2>/dev/null || git checkout release
+
+          # Copy the latest.json to release/latest.json
+          cp latest.json release/latest.json
+
+          # Commit and push the updated release/latest.json
+          git add release/latest.json
+          git commit -m "Update release/latest.json with new signatures" || echo "No changes to commit"
+          git push origin release
