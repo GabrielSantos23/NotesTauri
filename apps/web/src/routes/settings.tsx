@@ -13,6 +13,9 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -20,7 +23,42 @@ export const Route = createFileRoute("/settings")({
 
 function SettingsPage() {
   const navigate = useNavigate();
-  
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+
+  useEffect(() => {
+    // Try to load version from Tauri API; ignore errors if running in pure web
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => {
+        setAppVersion("");
+      });
+  }, []);
+
+  const handleCheckUpdates = async () => {
+    setIsCheckingUpdate(true);
+    try {
+      const update = await checkForUpdate();
+
+      if (!update || !update.available) {
+        toast.info("You're up to date");
+        return;
+      }
+
+      toast.message("Update available", {
+        description: `v${update.currentVersion} → v${update.version}`,
+      });
+
+      await update.downloadAndInstall();
+      toast.success("Update downloaded. Restarting...");
+      // On Windows NSIS, the installer will handle restart after install
+    } catch (error: any) {
+      toast.error("Failed to check/install updates");
+      console.error(error);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   return (
     <div className="p-6 max-w-4xl mx-auto min-h-full">
@@ -45,8 +83,6 @@ function SettingsPage() {
             Back to Notes
           </Button>
         </div>
-
-        
 
         <div className="border-none px-5 rounded-xl bg-card/80 shadow-sm">
           <div className="px-6 pt-6 pb-2">
@@ -163,14 +199,22 @@ function SettingsPage() {
           </div>
           <div className="px-6 pb-6">
             <div className="space-y-3 text-sm">
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Version</span>
-                <span>{appVersion}</span>
+                <span>{appVersion || "—"}</span>
               </div>
               <Separator />
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Build</span>
-                <span>2024.1.1</span>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Updates</span>
+                <Button
+                  size="sm"
+                  className="gap-2"
+                  onClick={handleCheckUpdates}
+                  disabled={isCheckingUpdate}
+                >
+                  <RefreshCw className={`h-4 w-4 ${isCheckingUpdate ? "animate-spin" : ""}`} />
+                  {isCheckingUpdate ? "Checking..." : "Check for updates"}
+                </Button>
               </div>
               <Separator />
               <div className="flex justify-between">
