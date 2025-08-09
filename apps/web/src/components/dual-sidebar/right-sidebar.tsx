@@ -301,7 +301,7 @@ export function RightSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
           <span>{history.length} total</span>
           <span className="flex items-center gap-1">
             <Settings className="size-3" />
-            Ctrl/Cmd+Shift+B toggles
+            Ctrl/Cmd+Alt+B toggles
           </span>
         </div>
       </SidebarFooter>

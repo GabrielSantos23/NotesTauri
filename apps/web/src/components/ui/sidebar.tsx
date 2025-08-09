@@ -170,8 +170,8 @@ function SidebarProvider({
         const key = (event.key || "").toLowerCase();
         if (key === SIDEBAR_KEYBOARD_SHORTCUT) {
           event.preventDefault();
-          if (event.shiftKey) {
-            // Ctrl/Cmd+Shift+B → toggle right
+          if (event.altKey) {
+            // Ctrl/Cmd+Alt+B → toggle right
             toggleSidebarRight();
           } else {
             // Ctrl/Cmd+B → toggle left
