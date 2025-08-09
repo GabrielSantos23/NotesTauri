@@ -13,6 +13,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { toast } from "sonner";
@@ -25,6 +26,8 @@ function SettingsPage() {
   const navigate = useNavigate();
   const [appVersion, setAppVersion] = useState<string>("");
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [autoCopyEnabled, setAutoCopyEnabled] = useState<boolean>(true);
+  const [persistenceEnabled, setPersistenceEnabled] = useState<boolean>(true);
 
   useEffect(() => {
     // Try to load version from Tauri API; ignore errors if running in pure web
@@ -33,6 +36,13 @@ function SettingsPage() {
       .catch(() => {
         setAppVersion("");
       });
+    // Load initial toggle states from backend
+    invoke<boolean>("get_clipboard_monitoring_enabled")
+      .then((v) => setAutoCopyEnabled(v))
+      .catch(() => {});
+    invoke<boolean>("get_persistence_enabled")
+      .then((v) => setPersistenceEnabled(v))
+      .catch(() => {});
   }, []);
 
   const handleCheckUpdates = async () => {
@@ -103,18 +113,20 @@ function SettingsPage() {
                   Automatically detect and import content from your clipboard
                 </p>
               </div>
-              <Switch />
+              <Switch
+                checked={autoCopyEnabled}
+                onCheckedChange={async (checked) => {
+                  setAutoCopyEnabled(checked);
+                  try {
+                    await invoke("set_clipboard_monitoring_enabled", {
+                      enabled: checked,
+                    });
+                  } catch {}
+                }}
+              />
             </div>
 
-            <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-card/50">
-              <div className="space-y-1">
-                <h3 className="font-medium">Clipboard monitoring</h3>
-                <p className="text-sm text-muted-foreground">
-                  Monitor clipboard changes in the background
-                </p>
-              </div>
-              <Switch defaultChecked />
-            </div>
+            {/* Removed redundant Clipboard monitoring toggle */}
           </div>
         </div>
 
@@ -156,9 +168,9 @@ function SettingsPage() {
           <div className="px-6 pt-6 pb-2">
             <div className="flex items-center gap-3">
               <div>
-                <div className="text-lg font-semibold">Appearance</div>
+                <div className="text-lg font-semibold">Persistence</div>
                 <div className="text-muted-foreground text-sm">
-                  Customize the look and feel of the app
+                  Control whether clipboard history is saved across restarts
                 </div>
               </div>
             </div>
@@ -166,22 +178,22 @@ function SettingsPage() {
           <div className="space-y-4 px-6 pb-6">
             <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-card/50">
               <div className="space-y-1">
-                <h3 className="font-medium">Dark mode</h3>
+                <h3 className="font-medium">Enable persistence</h3>
                 <p className="text-sm text-muted-foreground">
-                  Use dark theme for better eye comfort
+                  Save the last entries to disk and restore them on launch
                 </p>
               </div>
-              <Switch defaultChecked />
-            </div>
-
-            <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-card/50">
-              <div className="space-y-1">
-                <h3 className="font-medium">Reduced motion</h3>
-                <p className="text-sm text-muted-foreground">
-                  Minimize animations and transitions
-                </p>
-              </div>
-              <Switch />
+              <Switch
+                checked={persistenceEnabled}
+                onCheckedChange={async (checked) => {
+                  setPersistenceEnabled(checked);
+                  try {
+                    await invoke("set_persistence_enabled", {
+                      enabled: checked,
+                    });
+                  } catch {}
+                }}
+              />
             </div>
           </div>
         </div>
@@ -212,7 +224,9 @@ function SettingsPage() {
                   onClick={handleCheckUpdates}
                   disabled={isCheckingUpdate}
                 >
-                  <RefreshCw className={`h-4 w-4 ${isCheckingUpdate ? "animate-spin" : ""}`} />
+                  <RefreshCw
+                    className={`h-4 w-4 ${isCheckingUpdate ? "animate-spin" : ""}`}
+                  />
                   {isCheckingUpdate ? "Checking..." : "Check for updates"}
                 </Button>
               </div>

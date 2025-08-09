@@ -10,6 +10,14 @@ pub struct ClipboardContent {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ClipboardHistoryEntry {
+    pub id: String,
+    pub text: String,
+    pub pinned: bool,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Note {
     pub id: String,
     pub title: String,
@@ -33,6 +41,7 @@ pub struct SidebarState {
     pub last_sync_time: i64,
     pub is_collapsed: Option<bool>,
     pub selected_note_id: Option<String>,
+    pub is_right_collapsed: Option<bool>,
 }
 
 #[derive(Clone, Serialize)]
@@ -42,6 +51,9 @@ pub struct AppState {
     pub notes: Arc<Mutex<Vec<Note>>>,
     pub sidebar_state: Arc<Mutex<Option<SidebarState>>>,
     pub clipboard_monitoring_enabled: Arc<Mutex<bool>>,
+    pub clipboard_history: Arc<Mutex<Vec<ClipboardHistoryEntry>>>,
+    pub clipboard_history_limit: Arc<Mutex<usize>>,
+    pub persistence_enabled: Arc<Mutex<bool>>,
 }
 
 pub fn run() {

@@ -16,6 +16,7 @@ import {
   SidebarGroup,
   SidebarGroupLabel,
   useSidebar,
+  useSidebarWithSide,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,6 +61,7 @@ interface SidebarState {
   last_sync_time: number;
   is_collapsed?: boolean;
   selected_note_id?: string;
+  is_right_collapsed?: boolean;
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -72,6 +74,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   // Get sidebar state from the context
   const sidebar = useSidebar();
+  const rightSidebar = useSidebarWithSide("right");
 
   // Update our collapsed state when sidebar state changes
   useEffect(() => {
@@ -106,6 +109,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         last_sync_time: Date.now(),
         is_collapsed: isCollapsed,
         selected_note_id: selectedNoteId || undefined,
+        is_right_collapsed: rightSidebar.state === "collapsed",
       };
       console.log("💾 SAVING SIDEBAR STATE:", {
         notesCount: notes.length,
@@ -118,7 +122,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     } catch (error) {
       console.error("❌ Failed to save sidebar state:", error);
     }
-  }, [notes, isCollapsed, selectedNoteId]);
+  }, [notes, isCollapsed, selectedNoteId, rightSidebar.state]);
 
   // Save sidebar state whenever it changes
   useEffect(() => {
@@ -143,6 +147,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       saveSidebarState();
     }
   }, [isCollapsed, saveSidebarState]);
+
+  // Save RIGHT collapsed state changes as well
+  useEffect(() => {
+    console.log(
+      "📝 Right sidebar state changed, saving sidebar state...",
+      rightSidebar.state
+    );
+    saveSidebarState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rightSidebar.state]);
 
   // Listen for note updates to refresh the list
   useEffect(() => {
@@ -207,10 +221,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         setIsCollapsed(savedState.is_collapsed || false);
         setIsLoading(false);
 
-        // Restore sidebar collapsed state
-        if (savedState.is_collapsed) {
-          console.log("🔄 Restoring collapsed sidebar state");
+        // Restore left sidebar collapsed state (default is open)
+        if (savedState.is_collapsed === true) {
+          console.log("🔄 Restoring collapsed LEFT sidebar state");
           sidebar.setOpen(false);
+        }
+        // Restore right sidebar state (default is closed)
+        if (savedState.is_right_collapsed === true) {
+          console.log("🔄 Restoring collapsed RIGHT sidebar state");
+          rightSidebar.setOpen(false);
+        } else if (savedState.is_right_collapsed === false) {
+          console.log("🔄 Restoring EXPANDED RIGHT sidebar state");
+          rightSidebar.setOpen(true);
         }
       } else {
         console.log("❌ No saved state or empty notes, loading fresh data");

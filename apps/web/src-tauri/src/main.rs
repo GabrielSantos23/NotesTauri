@@ -14,8 +14,135 @@ use tauri_plugin_opener::OpenerExt;
 use window_vibrancy::apply_acrylic;
 use tauri::Manager;
 use std::sync::{Arc, Mutex};
-use app_lib::{AppState, Note, NoteMetadata, SidebarState, ClipboardContent};
+use app_lib::{AppState, Note, NoteMetadata, SidebarState, ClipboardContent, ClipboardHistoryEntry};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use png::{Encoder, ColorType, BitDepth};
+use std::io::Write;
+
+#[derive(Serialize, Clone)]
+struct ClipboardImagePayload {
+    data_url: String,
+    width: u32,
+    height: u32,
+}
+#[command]
+fn get_clipboard_history(app_state: tauri::State<'_, AppState>) -> Result<Vec<ClipboardHistoryEntry>, String> {
+    if let Ok(history) = app_state.clipboard_history.lock() {
+        Ok(history.clone())
+    } else {
+        Err("Failed to lock clipboard history".to_string())
+    }
+}
+
+#[command]
+fn set_clipboard_history_limit(limit: usize, app_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if limit == 0 { return Err("Limit must be greater than 0".to_string()); }
+    if let Ok(mut l) = app_state.clipboard_history_limit.lock() {
+        *l = limit;
+        // Persist with new limit enforced
+        if let Ok(mut history) = app_state.clipboard_history.lock() {
+            enforce_history_order_and_limit(&mut history, limit);
+            if let Err(e) = save_clipboard_history_to_disk(&history.clone()) {
+                eprintln!("Failed to save clipboard history: {}", e);
+            }
+        }
+        Ok(())
+    } else {
+        Err("Failed to set history limit".to_string())
+    }
+}
+
+#[command]
+fn get_clipboard_history_limit(app_state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    if let Ok(l) = app_state.clipboard_history_limit.lock() {
+        Ok(*l)
+    } else {
+        Err("Failed to get history limit".to_string())
+    }
+}
+
+#[command]
+fn clear_clipboard_history(keep_pinned: bool, app_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Ok(mut history) = app_state.clipboard_history.lock() {
+        if keep_pinned {
+            history.retain(|e| e.pinned);
+        } else {
+            history.clear();
+        }
+        // persist
+        if let Err(e) = save_clipboard_history_to_disk(&history.clone()) {
+            eprintln!("Failed to save clipboard history: {}", e);
+        }
+        Ok(())
+    } else {
+        Err("Failed to clear history".to_string())
+    }
+}
+
+#[command]
+fn pin_clipboard_entry(id: String, pinned: bool, app_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Ok(mut history) = app_state.clipboard_history.lock() {
+        if let Some(entry) = history.iter_mut().find(|e| e.id == id) {
+            entry.pinned = pinned;
+            // Re-sort: pinned first, then timestamp desc
+            history.sort_by(|a, b| {
+                match b.pinned.cmp(&a.pinned) {
+                    core::cmp::Ordering::Equal => b.timestamp.cmp(&a.timestamp),
+                    other => other,
+                }
+            });
+            if let Err(e) = save_clipboard_history_to_disk(&history.clone()) {
+                eprintln!("Failed to save clipboard history: {}", e);
+            }
+            Ok(())
+        } else {
+            Err("Entry not found".to_string())
+        }
+    } else {
+        Err("Failed to lock history".to_string())
+    }
+}
+
+#[command]
+fn delete_clipboard_entry(id: String, app_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Ok(mut history) = app_state.clipboard_history.lock() {
+        let before = history.len();
+        history.retain(|e| e.id != id);
+        if history.len() < before {
+            if let Err(e) = save_clipboard_history_to_disk(&history.clone()) {
+                eprintln!("Failed to save clipboard history: {}", e);
+            }
+            Ok(())
+        } else {
+            Err("Entry not found".to_string())
+        }
+    } else {
+        Err("Failed to lock history".to_string())
+    }
+}
+
+#[command]
+fn restore_clipboard_entry(text: String, app_handle: tauri::AppHandle, app_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // Write to system clipboard
+    let clipboard_manager = app_handle.clipboard();
+    clipboard_manager.write_text(text.clone()).map_err(|e| format!("Failed to write clipboard: {}", e))?;
+
+    // Mark internal copy to avoid loops
+    if let Ok(mut last_copy) = app_state.last_internal_copy.lock() {
+        *last_copy = text.clone();
+    }
+
+    // Emit event indicating this came from the app
+    app_handle.emit(
+        "clipboard-changed",
+        ClipboardContent { text, from_app: true }
+    ).map_err(|e| format!("Failed to emit event: {}", e))?;
+
+    Ok(())
+}
 use rfd::FileDialog;
+use base64::{engine::general_purpose, Engine as _};
 
 fn get_notes_dir() -> Result<PathBuf, String> {
     let documents_dir = dirs::document_dir()
@@ -82,6 +209,100 @@ fn delete_note_from_disk(note_id: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn get_clipboard_history_file() -> Result<PathBuf, String> {
+    let app_data_dir = get_app_data_dir()?;
+    Ok(app_data_dir.join("clipboard_history.json"))
+}
+
+fn enforce_history_order_and_limit(history: &mut Vec<ClipboardHistoryEntry>, limit: usize) {
+    // Remove duplicates by text, keeping the most recent occurrence (assumes newer entries first)
+    let mut seen = std::collections::HashSet::new();
+    history.retain(|e| seen.insert(e.text.clone()));
+    // Keep pinned entries and up to `limit` non-pinned entries
+    let mut non_pinned = 0usize;
+    history.retain(|e| {
+        if e.pinned { return true; }
+        if non_pinned < limit { non_pinned += 1; true } else { false }
+    });
+    // Sort: pinned first, then timestamp desc
+    history.sort_by(|a, b| {
+        match b.pinned.cmp(&a.pinned) {
+            core::cmp::Ordering::Equal => b.timestamp.cmp(&a.timestamp),
+            other => other,
+        }
+    });
+}
+
+fn load_clipboard_history_from_disk(limit: usize) -> Vec<ClipboardHistoryEntry> {
+    if let Ok(path) = get_clipboard_history_file() {
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(mut v) = serde_json::from_str::<Vec<ClipboardHistoryEntry>>(&content) {
+                    enforce_history_order_and_limit(&mut v, limit);
+                    return v;
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn save_clipboard_history_to_disk(history: &Vec<ClipboardHistoryEntry>) -> Result<(), String> {
+    let path = get_clipboard_history_file()?;
+    let json = serde_json::to_string_pretty(history)
+        .map_err(|e| format!("Failed to serialize clipboard history: {}", e))?;
+    fs::write(&path, json)
+        .map_err(|e| format!("Failed to write clipboard history: {}", e))
+}
+
+#[command]
+fn save_image_base64(data: String, suggested_name: Option<String>) -> Result<String, String> {
+    // Expect data URL: data:image/png;base64,XXXX
+    let (mime, b64) = if let Some(comma_idx) = data.find(",") {
+        let header = &data[..comma_idx];
+        let b64 = &data[comma_idx + 1..];
+        let mime = header
+            .split(':')
+            .nth(1)
+            .and_then(|s| s.split(';').next())
+            .unwrap_or("image/png");
+        (mime.to_string(), b64)
+    } else {
+        ("image/png".to_string(), data.as_str())
+    };
+
+    let ext = match mime.as_str() {
+        "image/jpeg" => "jpg",
+        "image/jpg" => "jpg",
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        _ => "png",
+    };
+
+    let bytes = general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+    let notes_dir = get_notes_dir()?;
+    let images_dir = notes_dir.join("images");
+    fs::create_dir_all(&images_dir)
+        .map_err(|e| format!("Failed to create images dir: {}", e))?;
+
+    let ts = Utc::now().timestamp_millis();
+    let filename = suggested_name
+        .and_then(|n| {
+            let n = n.trim();
+            if n.is_empty() { None } else { Some(n.to_string()) }
+        })
+        .unwrap_or_else(|| format!("img_{}.{ext}", ts));
+    let filepath = images_dir.join(filename);
+    fs::write(&filepath, bytes)
+        .map_err(|e| format!("Failed to write image: {}", e))?;
+
+    Ok(filepath.to_string_lossy().to_string())
 }
 
 #[command]
@@ -434,6 +655,30 @@ async fn set_clipboard_monitoring_enabled(enabled: bool, app_state: tauri::State
     }
 }
 
+#[tauri::command]
+async fn get_persistence_enabled(app_state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    if let Ok(enabled) = app_state.persistence_enabled.lock() {
+        Ok(*enabled)
+    } else {
+        Err("Failed to get persistence flag".to_string())
+    }
+}
+
+#[tauri::command]
+async fn set_persistence_enabled(enabled: bool, app_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Ok(mut flag) = app_state.persistence_enabled.lock() {
+        *flag = enabled;
+        if enabled {
+            if let Ok(history) = app_state.clipboard_history.lock() {
+                let _ = save_clipboard_history_to_disk(&history.clone());
+            }
+        }
+        Ok(())
+    } else {
+        Err("Failed to set persistence flag".to_string())
+    }
+}
+
 fn main() {
     // Load notes from disk on startup
     let initial_notes = match load_notes_from_disk() {
@@ -447,12 +692,17 @@ fn main() {
         }
     };
 
+    let initial_history = load_clipboard_history_from_disk(50);
+
     let app_state = AppState {
         is_focused: Arc::new(Mutex::new(false)),
         last_internal_copy: Arc::new(Mutex::new(String::new())),
         notes: Arc::new(Mutex::new(initial_notes)),
         sidebar_state: Arc::new(Mutex::new(None)),
         clipboard_monitoring_enabled: Arc::new(Mutex::new(true)),
+        clipboard_history: Arc::new(Mutex::new(initial_history)),
+        clipboard_history_limit: Arc::new(Mutex::new(50)),
+        persistence_enabled: Arc::new(Mutex::new(true)),
     };
 
     tauri::Builder::default()
@@ -482,7 +732,17 @@ fn main() {
             export_note_with_dialog,
             mark_internal_copy,
             get_clipboard_monitoring_enabled,
-            set_clipboard_monitoring_enabled
+            set_clipboard_monitoring_enabled,
+            save_image_base64,
+            get_clipboard_history,
+            set_clipboard_history_limit,
+            get_clipboard_history_limit,
+            clear_clipboard_history,
+            pin_clipboard_entry,
+            delete_clipboard_entry,
+            restore_clipboard_entry,
+            get_persistence_enabled,
+            set_persistence_enabled
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -511,9 +771,19 @@ fn main() {
             // Start clipboard monitoring in a separate thread
             thread::spawn(move || {
                 let mut last_content = String::new();
+                let mut last_image_hash = String::new();
                 println!("Clipboard monitoring thread started");
 
                 loop {
+                    // Respect the auto-copy/monitoring flag
+                    if let Some(state) = app_handle.try_state::<AppState>() {
+                        let enabled = *state.clipboard_monitoring_enabled.lock().unwrap();
+                        if !enabled {
+                            thread::sleep(Duration::from_millis(500));
+                            continue;
+                        }
+                    }
+
                     // Try to read clipboard using the plugin first
                     let clipboard_manager = app_handle.clipboard();
                     match clipboard_manager.read_text() {
@@ -521,6 +791,32 @@ fn main() {
                             if !text.is_empty() && text != last_content {
                                 last_content = text.clone();
                                 println!("Clipboard content detected: {}", text);
+
+                                // Update clipboard history
+                                if let Some(state) = app_handle.try_state::<AppState>() {
+                                    let limit = *state.clipboard_history_limit.lock().unwrap();
+                                    let mut history = state.clipboard_history.lock().unwrap();
+                                    // If same text exists, remove it (we will push as newest)
+                                    history.retain(|e| e.text != text);
+                                    history.insert(0, ClipboardHistoryEntry {
+                                        id: format!("clip_{}", Utc::now().timestamp_millis()),
+                                        text: text.clone(),
+                                        pinned: false,
+                                        timestamp: Utc::now(),
+                                    });
+                                    enforce_history_order_and_limit(&mut history, limit);
+                                }
+                                // Persist to disk if enabled
+                                if let Some(state) = app_handle.try_state::<AppState>() {
+                                    let enabled = *state.persistence_enabled.lock().unwrap();
+                                    if enabled {
+                                        if let Ok(history) = state.clipboard_history.lock() {
+                                            if let Err(e) = save_clipboard_history_to_disk(&history.clone()) {
+                                                eprintln!("Failed to save clipboard history: {}", e);
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // Emit event to frontend with new clipboard content
                                 if let Err(e) = app_handle.emit(
@@ -536,6 +832,41 @@ fn main() {
                                 }
                                 println!("Clipboard content changed: {}", text);
                             }
+                            // Also try to read image from clipboard when present
+                            // Using arboard as it provides raw image bytes
+                            if let Ok(img) = arboard::Clipboard::new().and_then(|mut cb| cb.get_image()) {
+                                let bytes = img.bytes.into_owned();
+                                // Compute hash to avoid duplicates
+                                let mut hasher = Sha256::new();
+                                hasher.update(&bytes);
+                                let hash = format!("{:x}", hasher.finalize());
+                                if hash != last_image_hash {
+                                    last_image_hash = hash;
+                                    // Encode to PNG
+                                    let mut png_data: Vec<u8> = Vec::new();
+                                    {
+                                        let mut encoder = Encoder::new(&mut png_data, img.width as u32, img.height as u32);
+                                        encoder.set_color(ColorType::Rgba);
+                                        encoder.set_depth(BitDepth::Eight);
+                                        match encoder.write_header() {
+                                            Ok(mut header) => {
+                                                if let Err(e) = header.write_image_data(&bytes) {
+                                                    eprintln!("Failed to write PNG data: {}", e);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Failed to write PNG header: {}", e);
+                                            }
+                                        }
+                                    }
+                                    if !png_data.is_empty() {
+                                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
+                                        let data_url = format!("data:image/png;base64,{}", b64);
+                                        let payload = ClipboardImagePayload { data_url, width: img.width as u32, height: img.height as u32 };
+                                        let _ = app_handle.emit("clipboard-image", payload);
+                                    }
+                                }
+                            }
                         }
                         Err(e) => {
                             eprintln!("Failed to read clipboard: {}", e);
@@ -544,7 +875,31 @@ fn main() {
                                 if !text.is_empty() && text != last_content {
                                     last_content = text.clone();
                                     println!("Clipboard content detected (alternative method): {}", text);
-                                    
+                                    // Update clipboard history
+                                    if let Some(state) = app_handle.try_state::<AppState>() {
+                                        let limit = *state.clipboard_history_limit.lock().unwrap();
+                                        let mut history = state.clipboard_history.lock().unwrap();
+                                        history.retain(|e| e.text != text);
+                                        history.insert(0, ClipboardHistoryEntry {
+                                            id: format!("clip_{}", Utc::now().timestamp_millis()),
+                                            text: text.clone(),
+                                            pinned: false,
+                                            timestamp: Utc::now(),
+                                        });
+                                        enforce_history_order_and_limit(&mut history, limit);
+                                    }
+                                    // Persist to disk if enabled
+                                    if let Some(state) = app_handle.try_state::<AppState>() {
+                                        let enabled = *state.persistence_enabled.lock().unwrap();
+                                        if enabled {
+                                            if let Ok(history) = state.clipboard_history.lock() {
+                                                if let Err(e) = save_clipboard_history_to_disk(&history.clone()) {
+                                                    eprintln!("Failed to save clipboard history: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     if let Err(e) = app_handle.emit(
                                         "clipboard-changed",
                                         ClipboardContent {
@@ -555,6 +910,38 @@ fn main() {
                                         eprintln!("Failed to emit clipboard event: {}", e);
                                     } else {
                                         println!("Clipboard event emitted successfully");
+                                    }
+                                }
+                            }
+                            // Attempt to read image via arboard in the fallback too
+                            if let Ok(img) = arboard::Clipboard::new().and_then(|mut cb| cb.get_image()) {
+                                let bytes = img.bytes.into_owned();
+                                let mut hasher = Sha256::new();
+                                hasher.update(&bytes);
+                                let hash = format!("{:x}", hasher.finalize());
+                                if hash != last_image_hash {
+                                    last_image_hash = hash;
+                                    let mut png_data: Vec<u8> = Vec::new();
+                                    {
+                                        let mut encoder = Encoder::new(&mut png_data, img.width as u32, img.height as u32);
+                                        encoder.set_color(ColorType::Rgba);
+                                        encoder.set_depth(BitDepth::Eight);
+                                        match encoder.write_header() {
+                                            Ok(mut header) => {
+                                                if let Err(e) = header.write_image_data(&bytes) {
+                                                    eprintln!("Failed to write PNG data: {}", e);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Failed to write PNG header: {}", e);
+                                            }
+                                        }
+                                    }
+                                    if !png_data.is_empty() {
+                                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
+                                        let data_url = format!("data:image/png;base64,{}", b64);
+                                        let payload = ClipboardImagePayload { data_url, width: img.width as u32, height: img.height as u32 };
+                                        let _ = app_handle.emit("clipboard-image", payload);
                                     }
                                 }
                             }

@@ -95,13 +95,16 @@ name = "app"
 version = "0.2.2"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "chrono",
  "dirs",
  "log",
+ "png",
  "rfd",
  "sanitize-filename",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",

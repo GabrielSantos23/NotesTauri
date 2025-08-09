@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "highlight.js/styles/github-dark.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -566,6 +567,31 @@ body {
 .ProseMirror pre code {
   background-color: transparent;
   padding: 0;
+}
+
+/* Image floats and NodeView styling */
+.ProseMirror img.image-float-left {
+  float: left;
+  margin: 0.25rem 0.75rem 0.75rem 0;
+}
+.ProseMirror img.image-float-right {
+  float: right;
+  margin: 0.25rem 0 0.75rem 0.75rem;
+}
+
+.tiptap-image-node {
+  position: relative;
+}
+
+.tiptap-image-node .resize-handle {
+  width: 10px;
+  height: 10px;
+  background: var(--foreground);
+  position: absolute;
+  bottom: -6px;
+  right: -6px;
+  cursor: nwse-resize;
+  border-radius: 2px;
 }
 
 .ProseMirror strong {
