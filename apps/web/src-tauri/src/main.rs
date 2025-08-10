@@ -293,6 +293,7 @@ fn restore_clipboard_entry(text: String, app_handle: tauri::AppHandle, app_state
 }
 use rfd::FileDialog;
 use base64::{engine::general_purpose, Engine as _};
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 fn get_notes_dir() -> Result<PathBuf, String> {
     let documents_dir = dirs::document_dir()
@@ -408,6 +409,99 @@ fn save_clipboard_history_to_disk(history: &Vec<ClipboardHistoryEntry>) -> Resul
         .map_err(|e| format!("Failed to serialize clipboard history: {}", e))?;
     fs::write(&path, json)
         .map_err(|e| format!("Failed to write clipboard history: {}", e))
+}
+
+#[command]
+fn new_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    // Create a new window with a unique label
+    let ts = Utc::now().timestamp_millis();
+    let label = format!("notes-{}", ts);
+    WebviewWindowBuilder::new(&app_handle, label, WebviewUrl::default())
+        .title("Notes_V2")
+        .build()
+        .map_err(|e| format!("Failed to create window: {}", e))?;
+    Ok(())
+}
+
+#[command]
+fn import_note_from_file(app_handle: tauri::AppHandle, app_state: tauri::State<'_, AppState>) -> Result<String, String> {
+    // Ask user for a text/markdown file and import it as a new note
+    let file_path = FileDialog::new()
+        .set_title("Open File")
+        .add_filter("Text / Markdown", &["txt", "md"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+        .ok_or("User cancelled the dialog")?;
+
+    let content = fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let filename = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Imported Note");
+
+    let now = Utc::now();
+    let id = format!("note_{}", now.timestamp_millis());
+    let note = Note {
+        id: id.clone(),
+        title: filename.to_string(),
+        content,
+        links: Vec::new(),
+        created_at: now,
+        updated_at: now,
+        tags: Vec::new(),
+        capture_type: Some("text".to_string()),
+        source_app: None,
+        window_title: None,
+    };
+
+    // Save to memory and disk
+    if let Ok(mut notes) = app_state.notes.lock() {
+        notes.push(note.clone());
+    }
+    save_note_to_disk(&note)?;
+
+    // Emit events so UI can refresh and track recents
+    let _ = app_handle.emit("note-saved", ());
+    let _ = app_handle.emit("recent-file-opened", file_path.to_string_lossy().to_string());
+
+    Ok(id)
+}
+
+#[command]
+fn import_note_from_path(path: String, app_handle: tauri::AppHandle, app_state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let file_path = PathBuf::from(&path);
+    let content = fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let filename = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Imported Note");
+
+    let now = Utc::now();
+    let id = format!("note_{}", now.timestamp_millis());
+    let note = Note {
+        id: id.clone(),
+        title: filename.to_string(),
+        content,
+        links: Vec::new(),
+        created_at: now,
+        updated_at: now,
+        tags: Vec::new(),
+        capture_type: Some("text".to_string()),
+        source_app: None,
+        window_title: None,
+    };
+
+    if let Ok(mut notes) = app_state.notes.lock() {
+        notes.push(note.clone());
+    }
+    save_note_to_disk(&note)?;
+    let _ = app_handle.emit("note-saved", ());
+    let _ = app_handle.emit("recent-file-opened", file_path.to_string_lossy().to_string());
+    Ok(id)
 }
 
 #[command]
@@ -934,6 +1028,9 @@ fn main() {
             load_note,
             list_notes,
             delete_note,
+            new_window,
+            import_note_from_file,
+            import_note_from_path,
             minimize_window,
             maximize_window,
             close_window,

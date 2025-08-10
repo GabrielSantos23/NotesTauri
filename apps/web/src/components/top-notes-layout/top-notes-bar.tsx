@@ -1,27 +1,46 @@
 "use client";
 
 import * as React from "react";
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import {
   Plus,
-  MoreHorizontal,
-  Trash2,
-  Download,
   Minus,
   Square,
   X,
   Maximize2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Separator } from "../ui/separator";
 // Header removed; window controls are integrated below
 
 interface NoteMetadata {
@@ -31,6 +50,21 @@ interface NoteMetadata {
   updated_at: string;
 }
 
+interface FullNote {
+  id: string;
+  title: string;
+  content: string;
+  links: string[];
+}
+
+interface SidebarState {
+  notes: NoteMetadata[];
+  last_sync_time: number;
+  is_collapsed?: boolean | null;
+  selected_note_id?: string | null;
+  is_right_collapsed?: boolean | null;
+}
+
 export function TopNotesBar() {
   const [notes, setNotes] = useState<NoteMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,9 +72,11 @@ export function TopNotesBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const newBtnRef = useRef<HTMLButtonElement | null>(null);
-  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const [visibleCount, setVisibleCount] = useState<number>(0);
+  const [isOverflowing, setIsOverflowing] = useState<boolean>(false);
+  const [canScrollLeft, setCanScrollLeft] = useState<boolean>(false);
+  const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
+  const [deleteTarget, setDeleteTarget] = useState<NoteMetadata | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState<boolean>(false);
 
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
@@ -51,7 +87,27 @@ export function TopNotesBar() {
   const loadNotes = useCallback(async () => {
     try {
       const list = await invoke<NoteMetadata[]>("list_notes");
-      setNotes(list);
+      let ordered = list;
+      try {
+        const state = await invoke<SidebarState | null>("load_sidebar_state");
+        if (state && Array.isArray(state.notes) && state.notes.length > 0) {
+          const idOrder = state.notes.map((n) => n.id);
+          const map = new Map(list.map((n) => [n.id, n] as const));
+          const inOrder: NoteMetadata[] = [];
+          idOrder.forEach((id) => {
+            const n = map.get(id);
+            if (n) inOrder.push(n);
+          });
+          // append notes not present in saved order
+          list.forEach((n) => {
+            if (!idOrder.includes(n.id)) inOrder.push(n);
+          });
+          ordered = inOrder;
+        }
+      } catch (err) {
+        // ignore ordering errors and fallback to list order
+      }
+      setNotes(ordered);
     } catch (e) {
       console.error("Failed to load notes", e);
     } finally {
@@ -59,100 +115,81 @@ export function TopNotesBar() {
     }
   }, []);
 
+  const persistOrder = useCallback(async (ordered: NoteMetadata[]) => {
+    try {
+      const state: SidebarState = {
+        notes: ordered,
+        last_sync_time: Date.now(),
+        is_collapsed: null,
+        selected_note_id: null,
+        is_right_collapsed: null,
+      };
+      await invoke("save_sidebar_state", { state });
+    } catch (e) {
+      console.error("Failed to save notes order", e);
+    }
+  }, []);
+
   useEffect(() => {
     loadNotes();
     const handler = () => loadNotes();
     window.addEventListener("note-saved", handler as EventListener);
-    return () =>
+    const onTitleChanged = (e: Event) => {
+      const detail = (e as CustomEvent).detail as {
+        noteId: string;
+        title: string;
+      };
+      if (!detail || !detail.noteId) return;
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === detail.noteId ? { ...n, title: detail.title } : n
+        )
+      );
+    };
+    window.addEventListener(
+      "note-title-changed",
+      onTitleChanged as EventListener
+    );
+    return () => {
       window.removeEventListener("note-saved", handler as EventListener);
+      window.removeEventListener(
+        "note-title-changed",
+        onTitleChanged as EventListener
+      );
+    };
   }, [loadNotes]);
 
   const filteredNotes = notes; // search moved to Command palette
 
-  const recalcVisible = useCallback(() => {
-    const containerWidth = containerRef.current?.clientWidth ?? 0;
-    const measuredNewWidth = newBtnRef.current?.offsetWidth ?? 0;
-    // Fallback width to always leave space for the New button even on first paint
-    const newButtonWidth = measuredNewWidth > 0 ? measuredNewWidth : 80;
-    const gap = 8; // gap-2
-
-    const countForReserve = (overflowReserve: number) => {
-      let used = 0;
-      let count = 0;
-      for (const note of filteredNotes) {
-        const el = itemRefs.current.get(note.id);
-        if (!el) continue;
-        const w = el.offsetWidth;
-        const add = count === 0 ? w : w + gap;
-        const available = containerWidth - newButtonWidth - overflowReserve;
-        if (used + add <= available) {
-          used += add;
-          count += 1;
-        } else {
-          break;
-        }
-      }
-      return count;
-    };
-
-    const total = filteredNotes.length;
-    const countNoOverflow = countForReserve(0);
-    if (countNoOverflow >= total) {
-      setVisibleCount(total);
-      return;
-    }
-    const countWithOverflow = countForReserve(40);
-    setVisibleCount(countWithOverflow);
-    // If we had to use fallback for new button width, try to recalc on next frame
-    if (measuredNewWidth === 0) {
-      requestAnimationFrame(() => {
-        const realWidth = newBtnRef.current?.offsetWidth ?? 0;
-        if (realWidth > 0) {
-          // Re-run with actual measurements
-          const containerW = containerRef.current?.clientWidth ?? 0;
-          const gap = 8;
-          const countForReserve2 = (overflowReserve: number) => {
-            let used2 = 0;
-            let count2 = 0;
-            for (const note of filteredNotes) {
-              const el2 = itemRefs.current.get(note.id);
-              if (!el2) continue;
-              const w2 = el2.offsetWidth;
-              const add2 = count2 === 0 ? w2 : w2 + gap;
-              const available2 = containerW - realWidth - overflowReserve;
-              if (used2 + add2 <= available2) {
-                used2 += add2;
-                count2 += 1;
-              } else {
-                break;
-              }
-            }
-            return count2;
-          };
-          const total2 = filteredNotes.length;
-          const noOverflow2 = countForReserve2(0);
-          if (noOverflow2 >= total2) setVisibleCount(total2);
-          else setVisibleCount(countForReserve2(40));
-        }
-      });
-    }
-  }, [filteredNotes]);
+  const updateOverflowState = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const hasOverflow = el.scrollWidth > el.clientWidth + 1; // tolerance
+    setIsOverflowing(hasOverflow);
+    setCanScrollLeft(el.scrollLeft > 0);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  }, []);
 
   useEffect(() => {
-    recalcVisible();
-  }, [filteredNotes, recalcVisible]);
+    updateOverflowState();
+  }, [filteredNotes, updateOverflowState]);
 
   useEffect(() => {
-    const ro = new ResizeObserver(() => recalcVisible());
-    if (containerRef.current) ro.observe(containerRef.current);
-    window.addEventListener("resize", recalcVisible);
+    const el = containerRef.current;
+    if (!el) return;
+    const onScroll = () => updateOverflowState();
+    const ro = new ResizeObserver(() => updateOverflowState());
+    ro.observe(el);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", updateOverflowState);
     return () => {
       ro.disconnect();
-      window.removeEventListener("resize", recalcVisible);
+      el.removeEventListener("scroll", onScroll as EventListener);
+      window.removeEventListener("resize", updateOverflowState);
     };
-  }, [recalcVisible]);
+  }, [updateOverflowState]);
 
-  const handleCreateNote = async () => {
+  const handleCreateNote = useCallback(async () => {
     if (isCreating) return;
     setIsCreating(true);
     try {
@@ -170,7 +207,7 @@ export function TopNotesBar() {
     } finally {
       setIsCreating(false);
     }
-  };
+  }, [isCreating, loadNotes, navigate]);
 
   const handleDeleteNote = async (id: string) => {
     try {
@@ -186,14 +223,18 @@ export function TopNotesBar() {
     }
   };
 
-  const handleExportNote = async (id: string) => {
-    try {
-      await invoke("export_note_with_dialog", { note_id: id });
-    } catch (e) {
-      console.error(e);
-      toast.error("Export failed");
-    }
-  };
+  // Keyboard shortcut: Ctrl/Cmd + T to create a new note
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isT = event.key.toLowerCase() === "t";
+      if (isT && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        handleCreateNote();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleCreateNote]);
 
   const handleMinimize = () => {
     invoke("minimize_window").catch((error) => {
@@ -217,152 +258,142 @@ export function TopNotesBar() {
     });
   };
 
+  const requestDelete = useCallback(async (noteMeta: NoteMetadata) => {
+    try {
+      const full = await invoke<FullNote>("load_note", { id: noteMeta.id });
+      const titleEmpty =
+        !full.title ||
+        full.title.trim() === "" ||
+        full.title === "Untitled Note";
+      const contentEmpty = !full.content || full.content.trim() === "";
+      const linksEmpty = !full.links || full.links.length === 0;
+      const isEmpty = titleEmpty && contentEmpty && linksEmpty;
+      if (isEmpty) {
+        await handleDeleteNote(noteMeta.id);
+        return;
+      }
+    } catch (e) {
+      // If load fails, be safe and ask for confirmation
+    }
+    setDeleteTarget(noteMeta);
+    setShowDeleteDialog(true);
+  }, []);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = notes.findIndex((n) => n.id === String(active.id));
+    const newIndex = notes.findIndex((n) => n.id === String(over.id));
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(notes, oldIndex, newIndex);
+    setNotes(reordered);
+    // Recompute overflow/scroll affordances after reorder
+    requestAnimationFrame(() => updateOverflowState());
+    // Persist order
+    persistOrder(reordered);
+  };
+
+  const scrollByAmount = (dir: "left" | "right") => {
+    const el = containerRef.current;
+    if (!el) return;
+    const delta = Math.max(200, Math.floor(el.clientWidth * 0.5));
+    el.scrollBy({ left: dir === "left" ? -delta : delta, behavior: "smooth" });
+  };
+
   return (
     <div
       data-tauri-acrylic
-      className="sticky top-0 z-30 w-full backdrop-blur-3xl bg-sidebar/95 border-b border-border select-none"
+      className="sticky top-0 z-30 w-full bg-sidebar/95 backdrop-blur-md  select-none"
     >
       <div className="w-full overflow-hidden">
         <div className="flex items-center gap-2 px-3 pt-2 min-h-[48px] header-draggable">
           <div
             ref={containerRef}
-            className="flex items-stretch gap-2 flex-1 overflow-hidden"
+            className="flex items-stretch gap-2 flex-1 overflow-x-auto overflow-y-hidden scrollbar-hidden scroll-smooth"
           >
             {isLoading ? (
               <div className="text-sm text-muted-foreground px-2">Loading…</div>
             ) : filteredNotes.length === 0 ? (
               <div className="text-sm text-muted-foreground px-2">No notes</div>
             ) : (
-              filteredNotes.map((note, index) => {
-                const isActive = selectedNoteId === note.id;
-                return (
-                  <div
-                    key={note.id}
-                    ref={(el) => {
-                      if (el) itemRefs.current.set(note.id, el);
-                    }}
-                    className={`group shrink-0 rounded-md relative ${
-                      isActive
-                        ? "border-primary bg-card rounded-t-lg rounded-b-none"
-                        : "border-border bg-transparent text-muted-foreground"
-                    } hover:bg-accent/50 transition-colors ${
-                      index >= visibleCount ? "hidden" : ""
-                    }`}
-                  >
-                    {/* Left SVG decoration for active note */}
-                    {isActive && (
-                      <div className="absolute -left-[50px] bottom-0 w-[50px] h-[100px] flex items-end">
-                        <svg
-                          width="50"
-                          height="50"
-                          viewBox="0 0 100 100"
-                          xmlns="http://www.w3.org/2000/svg"
-                          style={{ color: "oklch(0.205 0 0)" }}
-                        >
-                          <path
-                            d="M 100,100 L 60,100 A 40,40 0 0 0 100,60 Z"
-                            fill="currentColor"
-                          />
-                        </svg>
-                      </div>
-                    )}
-
-                    {/* Right SVG decoration for active note (inverted) */}
-                    {isActive && (
-                      <div className="absolute -right-[100px] bottom-0 w-[100px] h-[100px] flex items-end">
-                        <svg
-                          width="50"
-                          height="50"
-                          viewBox="0 0 100 100"
-                          xmlns="http://www.w3.org/2000/svg"
-                          style={{ color: "oklch(0.205 0 0)" }}
-                          className="scale-x-[-1]"
-                        >
-                          <path
-                            d="M 100,100 L 60,100 A 40,40 0 0 0 100,60 Z"
-                            fill="currentColor"
-                          />
-                        </svg>
-                      </div>
-                    )}
-
-                    <button
-                      className="px-3 py-2 text-sm whitespace-nowrap max-w-[240px] text-left"
-                      onClick={() =>
-                        navigate({
-                          to: "/note/$noteId",
-                          params: { noteId: note.id },
-                        })
-                      }
-                      title={note.title}
-                    >
-                      <span className="line-clamp-1">
-                        {note.title || "Untitled"}
-                      </span>
-                    </button>
-                    {/* <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button className="hidden group-hover:flex items-center justify-center w-full border-t border-border text-muted-foreground hover:text-foreground">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
-                      <DropdownMenuItem
-                        onClick={() => handleExportNote(note.id)}
-                      >
-                        <Download className="h-4 w-4 mr-2" /> Export…
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => handleDeleteNote(note.id)}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" /> Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu> */}
-                  </div>
-                );
-              })
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={filteredNotes.map((n) => n.id)}
+                  strategy={horizontalListSortingStrategy}
+                >
+                  {filteredNotes.map((note) => {
+                    const isActive = selectedNoteId === note.id;
+                    return (
+                      <SortableNoteItem
+                        key={note.id}
+                        note={note}
+                        isActive={!!isActive}
+                        onNavigate={() =>
+                          navigate({
+                            to: "/note/$noteId",
+                            params: { noteId: note.id },
+                          })
+                        }
+                        onDelete={() => {
+                          requestDelete(note);
+                        }}
+                      />
+                    );
+                  })}
+                </SortableContext>
+              </DndContext>
             )}
-            {/* Overflow dropdown for hidden notes */}
-            {filteredNotes.length - visibleCount > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="outline" className="shrink-0">
-                    +{filteredNotes.length - visibleCount}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  {filteredNotes.slice(visibleCount).map((n) => (
-                    <DropdownMenuItem
-                      key={n.id}
-                      onClick={() =>
-                        navigate({
-                          to: "/note/$noteId",
-                          params: { noteId: n.id },
-                        })
-                      }
-                    >
-                      {n.title || "Untitled"}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+          </div>
+          {/* New button fixed next to window controls */}
+          <div className="ml-auto flex items-center gap-1 non-draggable">
+            {isOverflowing && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => scrollByAmount("left")}
+                  disabled={!canScrollLeft}
+                  title="Scroll left"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => scrollByAmount("right")}
+                  disabled={!canScrollRight}
+                  title="Scroll right"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </>
             )}
-            {/* New note button at the end of the row */}
             <Button
+              variant="ghost"
               size="sm"
               onClick={handleCreateNote}
               disabled={isCreating}
-              className="gap-2 shrink-0 ml-2"
-              ref={newBtnRef}
+              className="gap-2 shrink-0 h-8 hover:bg-muted/50 bg-card"
+              title="New note (Ctrl/Cmd+T)"
             >
               <Plus className="h-4 w-4" />
-              New
             </Button>
-          </div>
-          {/* Window controls on the right */}
-          <div className="ml-auto flex items-center gap-1 non-draggable">
+            <div className="flex items-center h-8 px-1">
+              <Separator
+                orientation="vertical"
+                className="h-full w-px bg-muted-foreground/10"
+              />
+            </div>
             <Button
               variant="ghost"
               size="sm"
@@ -394,6 +425,136 @@ export function TopNotesBar() {
           </div>
         </div>
       </div>
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. The note will be permanently
+              deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowDeleteDialog(false)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteTarget) {
+                  const id = deleteTarget.id;
+                  setShowDeleteDialog(false);
+                  setDeleteTarget(null);
+                  handleDeleteNote(id);
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function SortableNoteItem({
+  note,
+  isActive,
+  onNavigate,
+  onDelete,
+}: {
+  note: NoteMetadata;
+  isActive: boolean;
+  onNavigate: () => void;
+  onDelete: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: note.id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.7 : 1,
+  };
+
+  return (
+    <div
+      ref={(el) => {
+        setNodeRef(el);
+      }}
+      style={style}
+      className={`group shrink-0 rounded-md relative non-draggable mt-1 ${
+        isActive
+          ? "border-primary bg-card rounded-t-lg rounded-b-none"
+          : "border-border bg-transparent text-muted-foreground hover:bg-accent/50"
+      } transition-colors`}
+      {...attributes}
+      {...listeners}
+    >
+      {isActive && (
+        <div className="absolute -left-[50px] bottom-0 w-[50px] h-[100px] flex items-end">
+          <svg
+            width="50"
+            height="50"
+            viewBox="0 0 100 100"
+            xmlns="http://www.w3.org/2000/svg"
+            style={{ color: "oklch(0.205 0 0)" }}
+          >
+            <path
+              d="M 100,100 L 60,100 A 40,40 0 0 0 100,60 Z"
+              fill="currentColor"
+            />
+          </svg>
+        </div>
+      )}
+
+      {isActive && (
+        <div className="absolute -right-[100px] bottom-0 w-[100px] h-[100px] flex items-end">
+          <svg
+            width="50"
+            height="50"
+            viewBox="0 0 100 100"
+            xmlns="http://www.w3.org/2000/svg"
+            style={{ color: "oklch(0.205 0 0)" }}
+            className="scale-x-[-1]"
+          >
+            <path
+              d="M 100,100 L 60,100 A 40,40 0 0 0 100,60 Z"
+              fill="currentColor"
+            />
+          </svg>
+        </div>
+      )}
+
+      <button
+        className="px-3 py-2 text-sm whitespace-nowrap max-w-[240px] text-left "
+        onClick={onNavigate}
+        title={note.title}
+      >
+        <span className="line-clamp-1">{note.title || "Untitled"}</span>
+      </button>
+
+      {/* Hover close button */}
+      <button
+        className="absolute -top-2 -right-2 hidden group-hover:flex items-center justify-center h-5 w-5 rounded-full bg-muted text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        aria-label="Delete note"
+        title="Delete note"
+      >
+        <X className="h-3 w-3" />
+      </button>
     </div>
   );
 }

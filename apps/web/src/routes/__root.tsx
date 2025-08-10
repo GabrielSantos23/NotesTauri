@@ -13,7 +13,7 @@ import "../index.css";
 import Sidebar from "@/components/dual-sidebar";
 import TopNotesLayout from "@/components/top-notes-layout";
 import { Separator } from "@/components/ui/separator";
-// Keep header removed; TopNotesBar is sticky and includes window controls
+// Header was removed; TopNotesBar now includes window controls
 import ErrorBoundary from "@/components/error-boundary";
 import { useEffect, useState } from "react";
 import Toolbar from "@/components/top-notes-layout/toolbar";
@@ -96,7 +96,7 @@ function RootComponent() {
           disableTransitionOnChange
           storageKey="vite-ui-theme"
         >
-          <div className="flex h-screen flex-col bg-transparent relative overflow-y-auto">
+          <div className="flex h-screen flex-col bg-transparent relative">
             <TopNotesLayout />
           </div>
           {/* <div className="flex h-[calc(100vh-3rem)] flex-col bg-transparent overflow-y-auto">

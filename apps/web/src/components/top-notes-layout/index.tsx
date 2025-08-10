@@ -13,7 +13,7 @@ const TopNotesLayout = () => {
       <TopNotesBar />
       <Toolbar />
       <div
-        className="flex-1 min-h-0 overflow-y-auto scrollbar-custom bg-background"
+        className="flex-1 overflow-y-auto scrollbar-custom"
         style={{
           scrollbarWidth: "thin",
           scrollbarColor: "var(--muted-foreground) transparent",

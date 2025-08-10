@@ -291,6 +291,103 @@ export function TipTapEditor({
     },
   });
 
+  // Listen to toolbar commands
+  useEffect(() => {
+    if (!editor) return;
+    const setHeading = (e: Event) => {
+      const level =
+        (e as CustomEvent<{ level: 0 | 1 | 2 | 3 | 4 | 5 | 6 }>).detail
+          ?.level ?? 0;
+      if (level === 0) {
+        editor.chain().focus().setParagraph().run();
+      } else if (level >= 1 && level <= 6) {
+        editor
+          .chain()
+          .focus()
+          .toggleHeading({ level: level as 1 | 2 | 3 | 4 | 5 | 6 })
+          .run();
+      }
+    };
+    const setList = (e: Event) => {
+      const type = (e as CustomEvent<{ type: "bullet" | "ordered" }>).detail
+        ?.type;
+      if (type === "bullet") {
+        editor.chain().focus().toggleBulletList().run();
+      } else if (type === "ordered") {
+        editor.chain().focus().toggleOrderedList().run();
+      }
+    };
+    const toggleBold = () => editor.chain().focus().toggleBold().run();
+    const toggleItalic = () => editor.chain().focus().toggleItalic().run();
+    const clearFormatting = () => {
+      editor.chain().focus().unsetAllMarks().clearNodes().run();
+    };
+
+    window.addEventListener("editor-set-heading", setHeading as EventListener);
+    window.addEventListener("editor-set-list", setList as EventListener);
+    window.addEventListener("editor-toggle-bold", toggleBold as EventListener);
+    window.addEventListener(
+      "editor-toggle-italic",
+      toggleItalic as EventListener
+    );
+    window.addEventListener(
+      "editor-clear-formatting",
+      clearFormatting as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        "editor-set-heading",
+        setHeading as EventListener
+      );
+      window.removeEventListener("editor-set-list", setList as EventListener);
+      window.removeEventListener(
+        "editor-toggle-bold",
+        toggleBold as EventListener
+      );
+      window.removeEventListener(
+        "editor-toggle-italic",
+        toggleItalic as EventListener
+      );
+      window.removeEventListener(
+        "editor-clear-formatting",
+        clearFormatting as EventListener
+      );
+    };
+  }, [editor]);
+
+  // Broadcast selection state so the toolbar can reflect active formats
+  useEffect(() => {
+    if (!editor) return;
+    const update = () => {
+      const isBold = editor.isActive("bold");
+      const isItalic = editor.isActive("italic");
+      let headingLevel: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 0;
+      for (let l = 1 as 1 | 2 | 3 | 4 | 5 | 6; l <= 6; l = (l + 1) as any) {
+        if (editor.isActive("heading", { level: l })) {
+          headingLevel = l;
+          break;
+        }
+      }
+      const listType = editor.isActive("bulletList")
+        ? ("bullet" as const)
+        : editor.isActive("orderedList")
+          ? ("ordered" as const)
+          : ("none" as const);
+      const detail = { headingLevel, listType, isBold, isItalic } as const;
+      window.dispatchEvent(
+        new CustomEvent("editor-selection-state", { detail })
+      );
+    };
+    update();
+    editor.on("selectionUpdate", update);
+    editor.on("transaction", update);
+    return () => {
+      editor.off("selectionUpdate", update);
+      editor.off("transaction", update);
+    };
+  }, [editor]);
+
   // --- NEW: Effect to handle pasted content from props ---
   useEffect(() => {
     if (editor && pastedContent) {

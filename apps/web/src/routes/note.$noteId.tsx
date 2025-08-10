@@ -337,6 +337,13 @@ function NoteComponent() {
       }
     };
 
+    const onSaveFromMenu = () => {
+      saveNote();
+    };
+    const onSaveAll = () => {
+      saveNote();
+    };
+
     const handleNavigateAway = (event: CustomEvent) => {
       const { to } = event.detail;
       handleNavigation(to);
@@ -371,6 +378,11 @@ function NoteComponent() {
     };
 
     document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener(
+      "notes-save-current",
+      onSaveFromMenu as EventListener
+    );
+    window.addEventListener("notes-save-all", onSaveAll as EventListener);
     document.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("click", handleSidebarClick);
     window.addEventListener("beforeunload", handleBeforeUnload);
@@ -381,6 +393,11 @@ function NoteComponent() {
 
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener(
+        "notes-save-current",
+        onSaveFromMenu as EventListener
+      );
+      window.removeEventListener("notes-save-all", onSaveAll as EventListener);
       document.removeEventListener("contextmenu", handleContextMenu);
       document.removeEventListener("click", handleSidebarClick);
       window.removeEventListener("beforeunload", handleBeforeUnload);
@@ -566,7 +583,7 @@ function NoteComponent() {
 
   if (!note) {
     return (
-      <div className="flex  w-full flex-col backdrop-blur-md h-screen bg-red-500 ">
+      <div className="flex  w-full flex-col backdrop-blur-md h-screen  ">
         <div className="flex h-full w-full max-w-4xl mx-auto p-4 sm:p-8 lg:p-12">
           <div className="flex h-full w-full flex-col">
             <div className="flex items-center justify-between mb-4">
@@ -580,28 +597,6 @@ function NoteComponent() {
                 />
               </div>
               <div className="flex items-center gap-2 ml-4">
-                {note?.capture_type && (
-                  <span className="text-xs px-2 py-1 rounded bg-muted capitalize">
-                    {note.capture_type}
-                  </span>
-                )}
-                {note?.tags && note.tags.length > 0 && (
-                  <div className="hidden sm:flex items-center gap-1">
-                    {note.tags.slice(0, 3).map((t, i) => (
-                      <span
-                        key={i}
-                        className="text-xs px-2 py-1 rounded bg-muted"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                    {note.tags.length > 3 && (
-                      <span className="text-xs px-2 py-1 rounded bg-muted">
-                        +{note.tags.length - 3}
-                      </span>
-                    )}
-                  </div>
-                )}
                 {hasUnsavedChanges && (
                   <span className="text-sm text-muted-foreground">*</span>
                 )}
@@ -707,8 +702,8 @@ function NoteComponent() {
 
   return (
     <>
-      <div className="flex h-full w-full flex-col backdrop-blur-md">
-        <div className="flex h-full w-full max-w-4xl mx-auto p-4 sm:p-8 lg:p-12">
+      <div className="flex  w-full flex-col backdrop-blur-md ">
+        <div className="flex h-full w-full max-w-4xl mx-auto p-4 sm:p-8 lg:p-12 ">
           <div className="flex h-full w-full flex-col">
             <div className="flex items-center justify-between mb-4">
               <div className="flex-1">
