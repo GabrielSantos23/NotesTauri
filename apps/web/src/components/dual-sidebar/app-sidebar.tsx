@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { format } from "date-fns";
@@ -96,10 +96,23 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const selectedNoteId = currentPath.startsWith("/note/")
     ? currentPath.split("/")[2]
     : null;
+  const didRestoreRouteRef = useRef(false);
 
   // Load sidebar state on component mount
   useEffect(() => {
     initializeSidebar();
+  }, []);
+  // Refresh when notes are saved from editor
+  useEffect(() => {
+    const handler = async () => {
+      try {
+        const freshNotes = await invoke<NoteMetadata[]>("list_notes");
+        setNotes(freshNotes);
+      } catch {}
+    };
+    window.addEventListener("note-saved", handler as EventListener);
+    return () =>
+      window.removeEventListener("note-saved", handler as EventListener);
   }, []);
 
   const saveSidebarState = useCallback(async () => {
@@ -221,6 +234,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         setIsCollapsed(savedState.is_collapsed || false);
         setIsLoading(false);
 
+        // Restore last opened note on first load if we're on home
+        if (!didRestoreRouteRef.current && savedState.selected_note_id) {
+          didRestoreRouteRef.current = true;
+          if (currentPath === "/") {
+            navigate({
+              to: "/note/$noteId",
+              params: { noteId: savedState.selected_note_id },
+            });
+          }
+        }
+
         // Restore left sidebar collapsed state (default is open)
         if (savedState.is_collapsed === true) {
           console.log("🔄 Restoring collapsed LEFT sidebar state");
@@ -279,6 +303,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       setIsLoading(false);
     }
   };
+
+  // Persist selected note when route changes
+  useEffect(() => {
+    // Skip initial mount until notes loaded to avoid writing empty state
+    if (isLoading) return;
+    saveSidebarState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPath]);
 
   const loadSidebarState = async () => {
     try {

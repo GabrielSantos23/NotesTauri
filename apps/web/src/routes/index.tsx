@@ -286,7 +286,7 @@ function HomeComponent() {
   };
 
   return (
-    <div className="flex  w-full flex-col backdrop-blur-md">
+    <div className="flex  w-full flex-col backdrop-blur-md  h-screen">
       <div className="flex h-full w-full max-w-4xl mx-auto p-4 sm:p-8 lg:p-12">
         <div className="flex h-full w-full flex-col">
           <div className="flex items-center justify-between mb-4">

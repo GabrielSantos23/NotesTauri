@@ -99,6 +99,7 @@ function SidebarProvider({
   defaultOpen,
   open: openProp,
   onOpenChange: setOpenProp,
+  enableShortcuts = true,
   className,
   style,
   children,
@@ -113,6 +114,8 @@ function SidebarProvider({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** When false, disables Ctrl/Cmd+B and Ctrl/Cmd+Alt+B global shortcuts */
+  enableShortcuts?: boolean;
 }) {
   const isMobile = useIsMobile();
 
@@ -165,6 +168,7 @@ function SidebarProvider({
   }, [isMobile, setOpenRight]);
 
   useEffect(() => {
+    if (!enableShortcuts) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey) {
         const key = (event.key || "").toLowerCase();
@@ -183,7 +187,7 @@ function SidebarProvider({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [toggleSidebarLeft, toggleSidebarRight]);
+  }, [toggleSidebarLeft, toggleSidebarRight, enableShortcuts]);
 
   const leftState: SidebarState = {
     state: openLeft ? "expanded" : "collapsed",

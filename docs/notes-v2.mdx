@@ -1,0 +1,156 @@
+---
+title: "Notes V2 — Local-first notes app with smart clipboard and screenshots"
+description: "A tour of Notes V2: dual sidebars, smart clipboard history, code-aware editor, screenshot capture, and one-click Markdown export."
+date: 2025-08-09
+tags: [notes, tauri, tiptap, clipboard, productivity]
+---
+
+## What is Notes V2?
+
+Notes V2 is a local-first desktop notes app built with Tauri and React. It pairs a distraction-free editor with dual sidebars: a notes list on the left and a smart clipboard history on the right. It detects links, code snippets, and screenshots from your clipboard to help you capture, organize, and export knowledge fast.
+
+> All data is stored locally. Exports use your system's native file dialog.
+
+## App layout at a glance
+
+- **Left sidebar (Notes)**: Create, search, select, export, and delete notes. Persists state across sessions.
+- **Center (Editor)**: Rich editor powered by TipTap with code blocks, images, drag-and-drop, and Markdown-aware paste.
+- **Right sidebar (Clipboard)**: Searchable clipboard history with pinning, drag to editor, restore to clipboard, and bulk clear.
+
+[GIF placeholder: Overview of the three-pane layout and navigation]
+
+## Key features
+
+- **Local-first**: Data stored on your device via Tauri, with optional persistence of clipboard history.
+- **Smart clipboard capture**: Automatically detects text, code, links, and screenshots.
+- **Fast capture to note**: Paste or drag clipboard entries directly into the editor.
+- **URL intelligence**: Normalizes multiple links, shows favicons/domains, and opens them natively.
+- **Code-aware editing**: Heuristics detect code and create highlighted code blocks with language support.
+- **Image tooling**: Paste images/screenshots, resize with a handle, and float left/right/none.
+- **Autosave + guard rails**: Save with Ctrl/Cmd+S and protection against losing unsaved changes when navigating.
+- **Markdown export**: One-click export via native dialog.
+- **Tunable rules**: JSON rules to tag/ignore/merge clipboard captures.
+
+[GIF placeholder: Quick demo of copying text/code/link and seeing it appear in the right sidebar]
+
+## Capture from the clipboard
+
+- **Automatic monitoring**: When enabled, copied text is analyzed and added to history.
+  - Detects URLs and normalizes them.
+  - Detects likely code snippets using whitespace and token heuristics.
+  - Adds domain-based tags for common sites (e.g., GitHub).
+- **Screenshots**: On Windows, the app detects screenshot tooling/window titles and offers to insert screenshots right into your note.
+- **Privacy-minded**: You can disable monitoring or persistence at any time.
+
+[GIF placeholder: Copying a URL → link appears with favicon → click to open]
+[GIF placeholder: Copying code → code icon/type appears → drag into editor]
+[GIF placeholder: Taking a screenshot → toast asks to insert → image appears in editor]
+
+## Writing notes
+
+- **Title + Links**: Add a title and optional multiple links. Links render with favicon + domain and can be opened natively.
+- **Editor**: TipTap with:
+  - Headings, lists, bold/italic, blockquotes
+  - Code blocks with syntax highlighting (JavaScript, TypeScript, JSON, HTML, CSS, Bash, Python, Go, Rust, YAML, Markdown…)
+  - Image paste/drag, resizable with a handle, float left/right/none
+  - Drag text/code directly from clipboard history into the editor
+- **Smart paste**: Pasting multi-line code or fenced blocks auto-creates a proper code block.
+
+[GIF placeholder: Dragging a clipboard entry into the editor and auto-formatting as code]
+[GIF placeholder: Pasting an image and resizing/floating it]
+
+## Managing notes
+
+- **Create**: Click New Note or hit the primary action in the left sidebar.
+- **Search**: Filter notes instantly as you type.
+- **Select**: Route-based selection persists across reloads; last note is restored.
+- **Delete**: Right-click/context menu or the row menu.
+- **Export**: Export any note to Markdown via the native file dialog.
+
+[GIF placeholder: Creating a note, typing, saving with Ctrl/Cmd+S, and exporting]
+
+## Links UI (multi-URL)
+
+- Paste or add multiple URLs. Notes V2 normalizes and deduplicates.
+- Primary link shows with favicon + domain; extra links are accessible via a +N dropdown.
+- Click to open in your system browser (using Tauri native open; falls back to window.open).
+
+[GIF placeholder: Adding multiple links, using the +N dropdown, and opening]
+
+## Clipboard history (right sidebar)
+
+- **Search**: Filter instantly.
+- **Pin/Unpin**: Keep important snippets at the top.
+- **Restore**: Copy an entry back to clipboard.
+- **Delete**: Remove individual entries or clear all (choose to keep pinned or not).
+- **Drag-and-drop**: Drag entries into the editor to insert.
+
+[GIF placeholder: Pinning, restoring, deleting, and dragging an entry]
+
+## Autosave and unsaved-change guard
+
+- **Autosave shortcut**: Ctrl/Cmd+S saves.
+- **Unsaved changes prompt**: If you try to navigate away with unsaved edits, you’ll be asked to Save, Discard, or Cancel.
+- **Minimized save**: If the window is minimized, a native notification confirms a successful save.
+
+[GIF placeholder: Editing, navigating to another note, and seeing the unsaved-changes dialog]
+
+## Settings
+
+- **Clipboard monitoring**: Toggle auto-import from clipboard.
+- **Persistence**: Toggle saving clipboard history to disk and restoring on launch.
+- **Minimum text length**: Skip short copies unless detected as code/link.
+- **Deduplication window**: Avoid re-adding near-duplicates for N minutes.
+- **Rules (JSON)**: Add regex rules to tag, ignore, or merge captures.
+
+```json
+[
+  {
+    "pattern": "github\\.com",
+    "field": "url",
+    "action": "tag",
+    "tag": "github"
+  },
+  { "pattern": "password", "field": "text", "action": "ignore" },
+  { "pattern": "(api|token)", "field": "text", "action": "merge" }
+]
+```
+
+[GIF placeholder: Toggling monitoring, changing limits, and saving rules]
+
+## Keyboard shortcuts
+
+- **Save**: Ctrl/Cmd+S
+- **Toggle right sidebar**: Ctrl/Cmd+Alt+B
+
+[GIF placeholder: Using keyboard shortcuts]
+
+## Privacy and data
+
+- Notes and history stay on your device. No cloud by default.
+- Export uses your OS-native file dialog; nothing is uploaded.
+
+[GIF placeholder: Export flow via native dialog]
+
+## Updating
+
+- Check for updates from Settings. On Windows installer builds, the updater handles restart when needed.
+
+[GIF placeholder: Checking for updates]
+
+## Tips
+
+- Drag code/text from the clipboard sidebar directly into the editor to keep flow.
+- Use multiple links per note; the +N dropdown keeps the UI tidy.
+- Use rules to auto-tag content from specific domains or ignore sensitive patterns.
+
+---
+
+## Appendix: Tech stack
+
+- **Desktop**: Tauri (Rust + WebView)
+- **Frontend**: React, TanStack Router, TipTap editor, shadcn/ui components
+- **Highlighting**: lowlight + highlight.js languages
+- **System integration**: Native notifications, file dialogs, and URL opening
+
+If you want a deep dive into implementation details or to see the code behind a specific feature, let me know and I can link the relevant modules.

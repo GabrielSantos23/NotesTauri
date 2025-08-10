@@ -368,7 +368,7 @@ export function TipTapEditor({
   }
 
   return (
-    <div className="w-full backdrop-blur-sm">
+    <div className="w-full backdrop-blur-sm bg-transparent">
       <EditorContent
         editor={editor}
         className={`min-h-[200px] w-full p-4 focus:outline-none backdrop-blur-sm scrollbar-custom ${className}`}

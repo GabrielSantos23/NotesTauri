@@ -1,9 +1,13 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarTrigger, useSidebarWithSide } from "@/components/ui/sidebar";
 
 export function Header() {
+  const leftSidebar = useSidebarWithSide("left");
+  if (leftSidebar.state !== "expanded") {
+    return null;
+  }
   return (
     <header
       className={cn(

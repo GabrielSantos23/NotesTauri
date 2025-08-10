@@ -11,10 +11,12 @@ import {
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import "../index.css";
 import Sidebar from "@/components/dual-sidebar";
+import TopNotesLayout from "@/components/top-notes-layout";
 import { Separator } from "@/components/ui/separator";
-import Header from "@/components/header";
+// Keep header removed; TopNotesBar is sticky and includes window controls
 import ErrorBoundary from "@/components/error-boundary";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import Toolbar from "@/components/top-notes-layout/toolbar";
 
 export interface RouterAppContext {}
 
@@ -45,6 +47,31 @@ function RootComponent() {
   });
   const location = useLocation();
   const isSettingsPage = location.pathname === "/settings";
+  const [layoutPref, setLayoutPref] = useState<string>(() =>
+    typeof window !== "undefined"
+      ? localStorage.getItem("notes_layout_pref") || "vertical"
+      : "vertical"
+  );
+  useEffect(() => {
+    const sync = () => {
+      const stored = localStorage.getItem("notes_layout_pref");
+      if (stored && stored !== layoutPref) setLayoutPref(stored);
+    };
+    sync();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "notes_layout_pref") sync();
+    };
+    const onCustom = () => sync();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("layout-pref-changed", onCustom as EventListener);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(
+        "layout-pref-changed",
+        onCustom as EventListener
+      );
+    };
+  }, [layoutPref]);
 
   // Prevent context menu on right click throughout the app
   useEffect(() => {
@@ -69,24 +96,15 @@ function RootComponent() {
           disableTransitionOnChange
           storageKey="vite-ui-theme"
         >
-          {/* Always-present draggable area */}
-          <div className="fixed top-0 left-0 right-0 h-12 z-40 header-draggable" />
-
-          {/* Overlay Header */}
-          <div className="fixed top-0 left-0 right-0 z-50 group">
-            {/* Invisible trigger area */}
-            {/* Header that slides down on hover */}
-            <div className="transform -translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out">
-              <Header />
-            </div>
+          <div className="flex h-screen flex-col bg-transparent relative overflow-y-auto">
+            <TopNotesLayout />
           </div>
-
-          <div className="flex h-screen bg-[#0a0a0acc]">
+          {/* <div className="flex h-[calc(100vh-3rem)] flex-col bg-transparent overflow-y-auto">
             {isSettingsPage ? (
               // Settings page layout without sidebar
               <div className="flex-1 flex flex-col">
                 <div
-                  className="flex-1 overflow-y-auto scrollbar-custom rounded-2xl"
+                  className="flex-1 overflow-y-auto scrollbar-custom rounded-2xl "
                   style={{
                     scrollbarWidth: "thin",
                     scrollbarColor: "var(--muted-foreground) transparent",
@@ -95,10 +113,12 @@ function RootComponent() {
                   <Outlet />
                 </div>
               </div>
+            ) : layoutPref === "vertical" ? (
+              <TopNotesLayout />
             ) : (
               <Sidebar />
             )}
-          </div>
+          </div> */}
           <Toaster richColors />
         </ThemeProvider>
         <TanStackRouterDevtools position="bottom-left" />

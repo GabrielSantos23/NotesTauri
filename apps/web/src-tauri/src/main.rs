@@ -1,12 +1,12 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use chrono::Utc;
+use chrono::{Utc, Duration as ChronoDuration};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{command, Emitter};
 use tauri_plugin_clipboard_manager::{init as clipboard_manager_plugin, ClipboardExt};
 
@@ -14,12 +14,162 @@ use tauri_plugin_opener::OpenerExt;
 use window_vibrancy::apply_acrylic;
 use tauri::Manager;
 use std::sync::{Arc, Mutex};
-use app_lib::{AppState, Note, NoteMetadata, SidebarState, ClipboardContent, ClipboardHistoryEntry};
+use app_lib::{AppState, Note, NoteMetadata, SidebarState, ClipboardContent, ClipboardHistoryEntry, Rule};
+use regex::Regex;
+use url::Url;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use png::{Encoder, ColorType, BitDepth};
-use std::io::Write;
 
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowTextLengthW};
+
+fn normalize_text_for_hash(text: &str) -> String {
+    let lowered = text.to_lowercase();
+    let collapsed_ws = lowered.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed_ws.trim().to_string()
+}
+
+fn compute_text_hash(text: &str) -> String {
+    let normalized = normalize_text_for_hash(text);
+    let mut hasher = Sha256::new();
+    hasher.update(normalized.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn is_url(text: &str) -> bool {
+    Url::parse(text).is_ok()
+}
+
+fn extract_domain(url: &str) -> Option<String> {
+    Url::parse(url).ok().and_then(|u| u.domain().map(|d| d.to_string()))
+}
+
+fn detect_capture_type(text: &str) -> String {
+    if is_url(text) { return "link".to_string(); }
+    let looks_like_code = text.contains('\n') && (text.contains(';') || text.contains('{') || text.contains('}') || text.contains("fn ") || text.contains("class "));
+    if looks_like_code { return "code".to_string(); }
+    "text".to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn get_active_window_info() -> (Option<String>, Option<String>) {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() { return (None, None); }
+        let len = GetWindowTextLengthW(hwnd);
+        let mut buf: Vec<u16> = vec![0; (len + 2) as usize];
+        let read = GetWindowTextW(hwnd, &mut buf);
+        let title = if read > 0 { String::from_utf16_lossy(&buf[..read as usize]) } else { String::new() };
+        (if title.is_empty() { None } else { Some(title) }, None)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_active_window_info() -> (Option<String>, Option<String>) { (None, None) }
+
+fn auto_tags_for_text_and_url(text: &str) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    if let Ok(u) = Url::parse(text) {
+        if let Some(domain) = u.domain() {
+            let t = match domain {
+                "github.com" => Some("github".to_string()),
+                "docs.rs" => Some("rust-docs".to_string()),
+                d => Some(d.split('.').next().unwrap_or(d).to_string()),
+            };
+            if let Some(tg) = t { tags.push(tg); }
+        }
+    }
+    tags
+}
+
+#[cfg(target_os = "windows")]
+fn is_snipping_window_title(title_lower: &str) -> bool {
+    title_lower.contains("snipping tool")
+        || title_lower.contains("snippingtool")
+        || title_lower.contains("snip & sketch")
+        || title_lower.contains("screen snip")
+        || title_lower.contains("screenshot")
+        || title_lower.contains("print screen")
+        || title_lower.contains("prt sc")
+        || title_lower.contains("sharex")
+        || title_lower.contains("greenshot")
+        || title_lower.contains("lightshot")
+        || title_lower.contains("snipaste")
+        || title_lower.contains("recorte")
+        || title_lower.contains("captura")
+        || title_lower.contains("ferramenta de recorte")
+        || title_lower.contains("recortes")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_snipping_window_title(_title_lower: &str) -> bool { false }
+
+// Heuristic: only treat clipboard images as screenshots when the active window
+// indicates a screenshot tool (Windows) to avoid firing toast for arbitrary images.
+fn is_probable_screenshot(img_width: u32, img_height: u32) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        if let (Some(title), _) = get_active_window_info() {
+            let t = title.to_lowercase();
+            // Common Windows screenshot tools / overlays (including localized keywords)
+            // English
+            if t.contains("snipping tool")
+                || t.contains("snippingtool")
+                || t.contains("snip & sketch")
+                || t.contains("screen snip")
+                || t.contains("screenshot")
+                || t.contains("print screen")
+                || t.contains("prt sc")
+                // Popular third-party tools
+                || t.contains("sharex")
+                || t.contains("greenshot")
+                || t.contains("lightshot")
+                || t.contains("snipaste")
+                // Portuguese / Spanish hints
+                || t.contains("recorte")
+                || t.contains("captura")
+                || t.contains("ferramenta de recorte")
+                || t.contains("recortes")
+            {
+                return true;
+            }
+        }
+        // Fallback: large images are likely screenshots
+        (img_width >= 800 && img_height >= 600) || (img_width as u64 * img_height as u64 >= 400_000)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Fallback for other platforms: large images only
+        (img_width >= 800 && img_height >= 600) || (img_width as u64 * img_height as u64 >= 400_000)
+    }
+}
+
+fn apply_rules(text: &str, source_url: Option<&str>, source_app: Option<&str>, capture_type: &str, rules: &Vec<Rule>) -> (Vec<String>, bool, bool) {
+    let mut tags: Vec<String> = Vec::new();
+    let mut ignore = false;
+    let mut merge = false;
+    for r in rules {
+        let re = match Regex::new(&r.pattern) { Ok(x) => x, Err(_) => continue };
+        let target = match r.field.as_str() {
+            "url" => source_url.unwrap_or(""),
+            "app" => source_app.unwrap_or(""),
+            "type" => capture_type,
+            _ => text,
+        };
+        if re.is_match(target) {
+            match r.action.as_str() {
+                "tag" => {
+                    if let Some(t) = &r.tag { tags.push(t.clone()); }
+                },
+                "ignore" => { ignore = true; },
+                "merge" => { merge = true; },
+                _ => {}
+            }
+        }
+    }
+    (tags, ignore, merge)
+}
 #[derive(Serialize, Clone)]
 struct ClipboardImagePayload {
     data_url: String,
@@ -217,9 +367,12 @@ fn get_clipboard_history_file() -> Result<PathBuf, String> {
 }
 
 fn enforce_history_order_and_limit(history: &mut Vec<ClipboardHistoryEntry>, limit: usize) {
-    // Remove duplicates by text, keeping the most recent occurrence (assumes newer entries first)
+    // Remove duplicates by content hash if present, else by text
     let mut seen = std::collections::HashSet::new();
-    history.retain(|e| seen.insert(e.text.clone()));
+    history.retain(|e| {
+        let key = e.content_hash.clone().unwrap_or_else(|| e.text.clone());
+        seen.insert(key)
+    });
     // Keep pinned entries and up to `limit` non-pinned entries
     let mut non_pinned = 0usize;
     history.retain(|e| {
@@ -361,6 +514,16 @@ fn save_note(title: String, content: String, links: Vec<String>, app_state: taur
     let now = Utc::now();
     let id = format!("note_{}", now.timestamp_millis());
 
+    let (window_title, source_app) = get_active_window_info();
+    // Auto tags from links
+    let mut tags: Vec<String> = Vec::new();
+    for l in &links {
+        if let Some(d) = extract_domain(l) {
+            tags.push(match d.as_str() { "github.com" => "github".to_string(), "docs.rs" => "rust-docs".to_string(), _ => d.split('.').next().unwrap_or(&d).to_string() });
+        }
+    }
+    let capture_type = if !links.is_empty() { Some("link".to_string()) } else { Some(detect_capture_type(&content)) };
+
     let note = Note {
         id: id.clone(),
         title: title.clone(),
@@ -368,6 +531,10 @@ fn save_note(title: String, content: String, links: Vec<String>, app_state: taur
         links,
         created_at: now,
         updated_at: now,
+        tags,
+        capture_type,
+        source_app,
+        window_title,
     };
 
     // Save to memory
@@ -390,6 +557,19 @@ fn update_note(id: String, title: String, content: String, links: Vec<String>, a
             note.content = content;
             note.links = links;
             note.updated_at = Utc::now();
+            // update context
+            note.capture_type = Some(if !note.links.is_empty() { "link".to_string() } else { detect_capture_type(&note.content) });
+            let (win_title, app_name) = get_active_window_info();
+            note.window_title = win_title;
+            note.source_app = app_name;
+            // regenerate tags from links
+            let mut tags: Vec<String> = Vec::new();
+            for l in &note.links {
+                if let Some(d) = extract_domain(l) {
+                    tags.push(match d.as_str() { "github.com" => "github".to_string(), "docs.rs" => "rust-docs".to_string(), _ => d.split('.').next().unwrap_or(&d).to_string() });
+                }
+            }
+            note.tags = tags;
 
             // Save updated note to disk
             save_note_to_disk(note)?;
@@ -679,6 +859,36 @@ async fn set_persistence_enabled(enabled: bool, app_state: tauri::State<'_, AppS
     }
 }
 
+#[tauri::command]
+fn set_min_clipboard_text_length(min_len: usize, app_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Ok(mut v) = app_state.min_clipboard_text_length.lock() { *v = min_len; Ok(()) } else { Err("Failed to set min length".into()) }
+}
+
+#[tauri::command]
+fn get_min_clipboard_text_length(app_state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    if let Ok(v) = app_state.min_clipboard_text_length.lock() { Ok(*v) } else { Err("Failed to get min length".into()) }
+}
+
+#[tauri::command]
+fn set_dedup_window_minutes(minutes: u64, app_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Ok(mut v) = app_state.dedup_window_minutes.lock() { *v = minutes; Ok(()) } else { Err("Failed to set dedup window".into()) }
+}
+
+#[tauri::command]
+fn get_dedup_window_minutes(app_state: tauri::State<'_, AppState>) -> Result<u64, String> {
+    if let Ok(v) = app_state.dedup_window_minutes.lock() { Ok(*v) } else { Err("Failed to get dedup window".into()) }
+}
+
+#[tauri::command]
+fn set_rules(rules: Vec<Rule>, app_state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Ok(mut r) = app_state.rules.lock() { *r = rules; Ok(()) } else { Err("Failed to set rules".into()) }
+}
+
+#[tauri::command]
+fn get_rules(app_state: tauri::State<'_, AppState>) -> Result<Vec<Rule>, String> {
+    if let Ok(r) = app_state.rules.lock() { Ok(r.clone()) } else { Err("Failed to get rules".into()) }
+}
+
 fn main() {
     // Load notes from disk on startup
     let initial_notes = match load_notes_from_disk() {
@@ -703,6 +913,9 @@ fn main() {
         clipboard_history: Arc::new(Mutex::new(initial_history)),
         clipboard_history_limit: Arc::new(Mutex::new(50)),
         persistence_enabled: Arc::new(Mutex::new(true)),
+        min_clipboard_text_length: Arc::new(Mutex::new(8)),
+        dedup_window_minutes: Arc::new(Mutex::new(3)),
+        rules: Arc::new(Mutex::new(Vec::new())),
     };
 
     tauri::Builder::default()
@@ -742,7 +955,13 @@ fn main() {
             delete_clipboard_entry,
             restore_clipboard_entry,
             get_persistence_enabled,
-            set_persistence_enabled
+            set_persistence_enabled,
+            set_min_clipboard_text_length,
+            get_min_clipboard_text_length,
+            set_dedup_window_minutes,
+            get_dedup_window_minutes,
+            set_rules,
+            get_rules
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -757,7 +976,7 @@ fn main() {
             #[cfg(target_os = "windows")]
             {
                 // Use acrylic for better backdrop blur support
-                if let Err(e) = apply_acrylic(&window, Some((18, 18, 18, 125))) {
+                if let Err(e) = apply_acrylic(&window, Some((0, 0, 0, 235))) {
                     eprintln!("Failed to apply acrylic on Windows: {}", e);
                 }
             }
@@ -772,9 +991,17 @@ fn main() {
             thread::spawn(move || {
                 let mut last_content = String::new();
                 let mut last_image_hash = String::new();
+                let mut last_snip_seen_at: Instant = Instant::now() - Duration::from_secs(60);
                 println!("Clipboard monitoring thread started");
 
                 loop {
+                    // Track if a snipping/screenshot window is active recently
+                    if let (Some(title), _) = get_active_window_info() {
+                        let t = title.to_lowercase();
+                        if is_snipping_window_title(&t) {
+                            last_snip_seen_at = Instant::now();
+                        }
+                    }
                     // Respect the auto-copy/monitoring flag
                     if let Some(state) = app_handle.try_state::<AppState>() {
                         let enabled = *state.clipboard_monitoring_enabled.lock().unwrap();
@@ -795,16 +1022,46 @@ fn main() {
                                 // Update clipboard history
                                 if let Some(state) = app_handle.try_state::<AppState>() {
                                     let limit = *state.clipboard_history_limit.lock().unwrap();
-                                    let mut history = state.clipboard_history.lock().unwrap();
-                                    // If same text exists, remove it (we will push as newest)
-                                    history.retain(|e| e.text != text);
-                                    history.insert(0, ClipboardHistoryEntry {
-                                        id: format!("clip_{}", Utc::now().timestamp_millis()),
-                                        text: text.clone(),
-                                        pinned: false,
-                                        timestamp: Utc::now(),
-                                    });
-                                    enforce_history_order_and_limit(&mut history, limit);
+                                    let min_len = *state.min_clipboard_text_length.lock().unwrap();
+                                    let dedup_mins = *state.dedup_window_minutes.lock().unwrap();
+                                    let rules = state.rules.lock().unwrap().clone();
+
+                                    let trimmed = text.trim().to_string();
+                                    let cap_type = detect_capture_type(&trimmed);
+                                    if trimmed.len() < min_len && cap_type != "code" && cap_type != "link" {
+                                        // skip short non-code/non-link
+                                    } else {
+                                        let (win_title, app_name) = get_active_window_info();
+                                        let source_url = if is_url(&trimmed) { Some(trimmed.clone()) } else { None };
+                                        let (mut extra_tags, ignore, _merge) = apply_rules(&trimmed, source_url.as_deref(), app_name.as_deref(), &cap_type, &rules);
+                                        if !ignore {
+                                            let mut history = state.clipboard_history.lock().unwrap();
+                                            let now_ts = Utc::now();
+                                            let hash = compute_text_hash(&trimmed);
+                                            history.retain(|e| {
+                                                if let Some(h) = &e.content_hash {
+                                                    if *h == hash {
+                                                        return now_ts - e.timestamp > ChronoDuration::minutes(dedup_mins as i64);
+                                                    }
+                                                }
+                                                true
+                                            });
+                                            if let Some(url) = &source_url { extra_tags.extend(auto_tags_for_text_and_url(url)); }
+                                            history.insert(0, ClipboardHistoryEntry {
+                                                id: format!("clip_{}", now_ts.timestamp_millis()),
+                                                text: trimmed.clone(),
+                                                pinned: false,
+                                                timestamp: now_ts,
+                                                source_app: app_name,
+                                                window_title: win_title,
+                                                source_url,
+                                                capture_type: cap_type,
+                                                tags: extra_tags,
+                                                content_hash: Some(hash),
+                                            });
+                                            enforce_history_order_and_limit(&mut history, limit);
+                                        }
+                                    }
                                 }
                                 // Persist to disk if enabled
                                 if let Some(state) = app_handle.try_state::<AppState>() {
@@ -860,10 +1117,17 @@ fn main() {
                                         }
                                     }
                                     if !png_data.is_empty() {
-                                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
-                                        let data_url = format!("data:image/png;base64,{}", b64);
-                                        let payload = ClipboardImagePayload { data_url, width: img.width as u32, height: img.height as u32 };
-                                        let _ = app_handle.emit("clipboard-image", payload);
+                                        let probable_size = is_probable_screenshot(img.width as u32, img.height as u32);
+                                        let recent_snip = last_snip_seen_at.elapsed() <= Duration::from_secs(6);
+                                        let probable = probable_size || recent_snip;
+                                        let (win_title, _) = get_active_window_info();
+                                        println!("📸 Clipboard image {}x{}, window={:?}, probable_screenshot={}, recent_snip={}", img.width, img.height, win_title, probable, recent_snip);
+                                        if probable {
+                                            let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
+                                            let data_url = format!("data:image/png;base64,{}", b64);
+                                            let payload = ClipboardImagePayload { data_url, width: img.width as u32, height: img.height as u32 };
+                                            let _ = app_handle.emit("clipboard-image", payload);
+                                        }
                                     }
                                 }
                             }
@@ -878,15 +1142,44 @@ fn main() {
                                     // Update clipboard history
                                     if let Some(state) = app_handle.try_state::<AppState>() {
                                         let limit = *state.clipboard_history_limit.lock().unwrap();
-                                        let mut history = state.clipboard_history.lock().unwrap();
-                                        history.retain(|e| e.text != text);
-                                        history.insert(0, ClipboardHistoryEntry {
-                                            id: format!("clip_{}", Utc::now().timestamp_millis()),
-                                            text: text.clone(),
-                                            pinned: false,
-                                            timestamp: Utc::now(),
-                                        });
-                                        enforce_history_order_and_limit(&mut history, limit);
+                                        let min_len = *state.min_clipboard_text_length.lock().unwrap();
+                                        let dedup_mins = *state.dedup_window_minutes.lock().unwrap();
+                                        let rules = state.rules.lock().unwrap().clone();
+
+                                        let trimmed = text.trim().to_string();
+                                        let cap_type = detect_capture_type(&trimmed);
+                                        if trimmed.len() >= min_len || cap_type == "code" || cap_type == "link" {
+                                            let (win_title, app_name) = get_active_window_info();
+                                            let source_url = if is_url(&trimmed) { Some(trimmed.clone()) } else { None };
+                                            let (mut extra_tags, ignore, _merge) = apply_rules(&trimmed, source_url.as_deref(), app_name.as_deref(), &cap_type, &rules);
+                                            if !ignore {
+                                                let mut history = state.clipboard_history.lock().unwrap();
+                                                let now_ts = Utc::now();
+                                                let hash = compute_text_hash(&trimmed);
+                                                history.retain(|e| {
+                                                    if let Some(h) = &e.content_hash {
+                                                        if *h == hash {
+                                                            return now_ts - e.timestamp > ChronoDuration::minutes(dedup_mins as i64);
+                                                        }
+                                                    }
+                                                    true
+                                                });
+                                                if let Some(url) = &source_url { extra_tags.extend(auto_tags_for_text_and_url(url)); }
+                                                history.insert(0, ClipboardHistoryEntry {
+                                                    id: format!("clip_{}", now_ts.timestamp_millis()),
+                                                    text: trimmed.clone(),
+                                                    pinned: false,
+                                                    timestamp: now_ts,
+                                                    source_app: app_name,
+                                                    window_title: win_title,
+                                                    source_url,
+                                                    capture_type: cap_type,
+                                                    tags: extra_tags,
+                                                    content_hash: Some(hash),
+                                                });
+                                                enforce_history_order_and_limit(&mut history, limit);
+                                            }
+                                        }
                                     }
                                     // Persist to disk if enabled
                                     if let Some(state) = app_handle.try_state::<AppState>() {
@@ -938,10 +1231,17 @@ fn main() {
                                         }
                                     }
                                     if !png_data.is_empty() {
-                                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
-                                        let data_url = format!("data:image/png;base64,{}", b64);
-                                        let payload = ClipboardImagePayload { data_url, width: img.width as u32, height: img.height as u32 };
-                                        let _ = app_handle.emit("clipboard-image", payload);
+                                        let probable_size = is_probable_screenshot(img.width as u32, img.height as u32);
+                                        let recent_snip = last_snip_seen_at.elapsed() <= Duration::from_secs(6);
+                                        let probable = probable_size || recent_snip;
+                                        let (win_title, _) = get_active_window_info();
+                                        println!("📸 Clipboard image (fallback) {}x{}, window={:?}, probable_screenshot={}, recent_snip={}", img.width, img.height, win_title, probable, recent_snip);
+                                        if probable {
+                                            let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
+                                            let data_url = format!("data:image/png;base64,{}", b64);
+                                            let payload = ClipboardImagePayload { data_url, width: img.width as u32, height: img.height as u32 };
+                                            let _ = app_handle.emit("clipboard-image", payload);
+                                        }
                                     }
                                 }
                             }

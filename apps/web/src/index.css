@@ -6,7 +6,7 @@
 
 html,
 body {
-  background: transparent !important;
+  background: #0000002c !important;
   min-height: 100vh;
   overflow-x: hidden;
 
@@ -159,7 +159,7 @@ body {
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: oklch(0.145 0 0 / 51.83%);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
@@ -400,6 +400,11 @@ body {
 /* TipTap Editor Styles */
 .ProseMirror {
   @apply outline-none;
+}
+
+.ProseMirror img {
+  /* Ensure transparent images don't look washed out over acrylic window */
+  background-color: var(--card);
 }
 
 .ProseMirror p.is-editor-empty:first-child::before {

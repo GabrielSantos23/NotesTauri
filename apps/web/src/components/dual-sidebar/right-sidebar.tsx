@@ -37,6 +37,12 @@ type ClipboardEntry = {
   text: string;
   pinned: boolean;
   timestamp: string;
+  source_app?: string | null;
+  window_title?: string | null;
+  source_url?: string | null;
+  capture_type?: string; // "text" | "code" | "link" | "image"
+  tags?: string[];
+  content_hash?: string | null;
 };
 
 export function RightSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
@@ -169,31 +175,9 @@ export function RightSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
       <SidebarRail />
       <SidebarHeader>
         <SidebarMenu>
-          <div className="px-2 py-1 flex items-center justify-between">
+          <div className="px-2 py-1 flex items-center justify-center">
             <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               Clipboard History
-            </div>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => handleClear(true)}
-                title="Clear non-pinned"
-              >
-                <X className="size-3 mr-1" />
-                Clear
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => handleClear(false)}
-                title="Clear all"
-              >
-                <Trash2 className="size-3 mr-1" />
-                All
-              </Button>
             </div>
           </div>
           <div className="px-2 pb-2">
@@ -241,15 +225,38 @@ export function RightSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
                           }}
                           title="Drag into editor to insert"
                         >
-                          <div className="text-xs whitespace-pre-wrap break-words max-w-[7rem]">
-                            {e.text.length > 100
-                              ? e.text.slice(0, 100) + "…"
-                              : e.text}
+                          <div className="text-xs whitespace-nowrap overflow-hidden min-h-5  text-ellipsis max-w-[7rem]">
+                            {e.text.replace(/\s+/g, " ").length > 100
+                              ? e.text.replace(/\s+/g, " ").slice(0, 100) + "…"
+                              : e.text.replace(/\s+/g, " ")}
                           </div>
-                          <div className="flex items-center gap-1 opacity-70 text-[10px]">
+                          <div
+                            className="flex items-center gap-1 opacity-70 text-[10px] flex-wrap"
+                            title={e.window_title || undefined}
+                          >
                             {e.pinned ? (
                               <span className="px-1 rounded bg-muted">
                                 Pinned
+                              </span>
+                            ) : null}
+                            {e.capture_type ? (
+                              <span className="px-1 rounded bg-muted capitalize">
+                                {e.capture_type}
+                              </span>
+                            ) : null}
+                            {e.tags && e.tags.length > 0
+                              ? e.tags.slice(0, 3).map((t, i) => (
+                                  <span
+                                    key={i}
+                                    className="px-1 rounded bg-muted"
+                                  >
+                                    {t}
+                                  </span>
+                                ))
+                              : null}
+                            {e.tags && e.tags.length > 3 ? (
+                              <span className="px-1 rounded bg-muted">
+                                +{e.tags.length - 3}
                               </span>
                             ) : null}
                           </div>
@@ -296,7 +303,24 @@ export function RightSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
       <SidebarFooter className="text-xs text-muted-foreground px-3 py-2">
+        {history.length > 0 && (
+          <div className="px-2 py-1 flex items-center justify-center w-full">
+            <div className="flex items-center gap-1 w-full">
+              <Button
+                variant="ghost"
+                size="sm"
+                className=" text-xs w-full flex items-center justify-center"
+                onClick={() => handleClear(false)}
+                title="Clear all"
+              >
+                <Trash2 className="size-3 mr-1" />
+                Delete all (with pinned)
+              </Button>
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-between">
           <span>{history.length} total</span>
           <span className="flex items-center gap-1">
