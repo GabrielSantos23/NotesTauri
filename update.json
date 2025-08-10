@@ -1,7 +1,7 @@
 {
-  "version": "0.1.1",
-  "pub_date": "2024-01-15T12:00:00Z",
-  "url": "https://github.com/GabrielSantos23/NotesApp/releases/download/v0.1.1/Notes_0.1.0_x64-setup.exe",
-  "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaEYwSTA5N1kyWUk1UEMxQ205Wk9jalVDSTJrQUVIbENPK0lTNHc5UmZsMU9WVzJiZ1VEdVJpeGU2a3drdjhjWjV3cHN5REZWS1ZVV3d1aXk1OUM4MUxPOFVIcUhDSHdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzU0MTcwNDY3CWZpbGU6Tm90ZXNfMC4xLjBfeDY0LXNldHVwLmV4ZQp5TnBOSCtNR1RESzZOOTc5c25sTnRWRGNoRnZkS2llcW1vNnJmdkJTWlFNOVBnc21FR05UbUJZSUlGSzlTYkJWSEN4UjNGaGhqdk9XN280cFpOeE5Cdz09Cg==",
-  "notes": "Bug fixes and performance improvements."
-} 
+    "url":  "https://github.com/GabrielSantos23/NotesTauri/releases/download/v0.2.6/Notes_0.2.6_x64-setup.exe",
+    "pub_date":  "2025-08-10T20:52:36.2983119Z",
+    "version":  "0.2.6",
+    "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUakRZd1R0MUZmS2pMcUkyQ0N6enpQNzhGa2NsUWVGZmt4RHpYRjNjanVCNFl3RjRnN01wUE84MElHV2Fwa2ZxSzJQN2VrdWUzaTBxRW45cGlOM0svK2MxSk1BQ1liQlE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzU0ODU4OTI1CWZpbGU6Tm90ZXNfMC4yLjZfeDY0LXNldHVwLmV4ZQpqQVNqeWRsQUZHaE1mWUVsL2Nkb2RzYVQ0ditxZUVMRjVLaHpBSjg1Y00yWFVVVjBERXV0Z3RoNGZhdmJoblcxZUdUWjl1cGlOV3AvaDVmL1RDbmVCQT09Cg==",
+    "notes":  "Bug fixes and performance improvements."
+}

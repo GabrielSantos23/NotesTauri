@@ -1,0 +1,11 @@
+{
+    "platforms":  {
+                      "windows-x86_64":  {
+                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUakRZd1R0MUZmS2pMcUkyQ0N6enpQNzhGa2NsUWVGZmt4RHpYRjNjanVCNFl3RjRnN01wUE84MElHV2Fwa2ZxSzJQN2VrdWUzaTBxRW45cGlOM0svK2MxSk1BQ1liQlE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzU0ODU4OTI1CWZpbGU6Tm90ZXNfMC4yLjZfeDY0LXNldHVwLmV4ZQpqQVNqeWRsQUZHaE1mWUVsL2Nkb2RzYVQ0ditxZUVMRjVLaHpBSjg1Y00yWFVVVjBERXV0Z3RoNGZhdmJoblcxZUdUWjl1cGlOV3AvaDVmL1RDbmVCQT09Cg==",
+                                             "url":  "https://github.com/GabrielSantos23/NotesTauri/releases/download/v0.2.6/Notes_0.2.6_x64-setup.exe"
+                                         }
+                  },
+    "pub_date":  "2025-08-10T20:52:36.2983119Z",
+    "version":  "0.2.6",
+    "notes":  ""
+}
